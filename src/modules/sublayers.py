@@ -128,7 +128,7 @@ class MultiHeadedAttention(nn.Module):
         # 3) Apply attention dropout and compute context vectors.
         attn = self.sm(scores)
 
-        # is copy head? sample_K=0相当于不复制
+        # sample_K=0相当于不复制,故训练时，设置sample_K=0
         if self.copy_head and sample_K > 0:
             # random.seed(seed)
             # [batch_size, head_count]

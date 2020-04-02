@@ -30,7 +30,12 @@ model_configs:
   dropout: 0.1
   proj_share_weight: true
   label_smoothing: 0.1
-  copy_head: true
+
+  loss_configs:
+    - type: "nmt_criterion"
+      label_smoothing: 0.1
+    - type: "checkpoint_loss"
+      init_use_KD: true
 
 optimizer_configs:
   optimizer: "adam"
@@ -41,6 +46,7 @@ optimizer_configs:
   scheduler_configs:
     d_model: 512
     warmup_steps: 8000
+
 
 training_configs:
   seed: 1234

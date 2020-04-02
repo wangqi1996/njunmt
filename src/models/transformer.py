@@ -113,15 +113,11 @@ class Encoder(nn.Module):
 class DecoderBlock(nn.Module):
     ''' Compose with three layers '''
 
-    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, copy_head=False, final=False):
+    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, copy_head=False):
         super(DecoderBlock, self).__init__()
 
         self.slf_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
                                              dim_per_head=dim_per_head)
-        if final and copy_head:
-            copy_head = True
-        else:
-            copy_head = False
         self.ctx_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
                                              dim_per_head=dim_per_head, copy_head=copy_head)
         self.pos_ffn = PositionwiseFeedForward(size=d_model, hidden_size=d_inner_hid)
@@ -177,7 +173,7 @@ class Decoder(nn.Module):
 
         self.block_stack = nn.ModuleList([
             DecoderBlock(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
-                         dim_per_head=dim_per_head, final=layer == n_layers - 1, copy_head=copy_head)
+                         dim_per_head=dim_per_head, copy_head=(copy_head and (layer==n_layers-1)))
             for layer in range(n_layers)])
 
         self.out_layer_norm = nn.LayerNorm(d_model)

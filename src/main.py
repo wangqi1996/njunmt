@@ -17,10 +17,11 @@ from src.data.vocabulary import Vocabulary
 from src.decoding import beam_search, ensemble_beam_search
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model
-from src.modules.criterions import NMTCriterion, WordKDCriterion
+from src.modules.criterions import NMTCriterion, CombinationCriterion
 from src.optim import Optimizer
 from src.optim.lr_scheduler import ReduceOnPlateauScheduler, NoamScheduler
 from src.utils.common_utils import *
+from src.utils.common_utils import add_dict_value
 from src.utils.configs import default_configs, pretty_configs
 from src.utils.logging import *
 from src.utils.moving_average import MovingAverage
@@ -130,8 +131,7 @@ def compute_forward(model,
                     seqs_y,
                     eval=False,
                     normalization=1.0,
-                    norm_by_words=False,
-                    KD_critic=None
+                    norm_by_words=False
                     ):
     """
     :type model: nn.Module
@@ -149,31 +149,27 @@ def compute_forward(model,
         # For training
         with torch.enable_grad():
             log_probs = model(seqs_x, y_inp)
-            loss = critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization)
-
-            if KD_critic is not None and KD_critic.use_KD_loss:
-                teacher_output = KD_critic.get_teacher_output(seqs_x, y_inp)
-                KD_loss = KD_critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization,
-                                    teacher_output=teacher_output)
-                loss = loss + KD_loss
-
+            loss, loss_dict = critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization,
+                                     seqs_x=seqs_x, y_inp=y_inp)
             if norm_by_words:
                 loss = loss.div(words_norm).sum()
+                loss_dict = {name: value.div(words_norm).sum().item() for name, value in loss_dict.items()}
             else:
                 loss = loss.sum()
+                loss_dict = {name: value.sum().item() for name, value in loss_dict.items()}
         torch.autograd.backward(loss)
-        return loss.item()
+        return loss.item(), loss_dict
     else:
         model.eval()
         critic.eval()
         # For compute loss
         with torch.no_grad():
             log_probs = model(seqs_x, y_inp)
-            loss = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True)
-        return loss.item()
+            loss, loss_dict = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True)
+        return loss.item(), {name: value.item() for name, value in loss_dict.items()}
 
 
-def loss_validation(model, critic, valid_iterator, KD_critic):
+def loss_validation(model, critic, valid_iterator):
     """
     :type model: Transformer
 
@@ -186,6 +182,7 @@ def loss_validation(model, critic, valid_iterator, KD_critic):
     n_tokens = 0.0
 
     sum_loss = 0.0
+    valid_loss_dict = {}
 
     valid_iter = valid_iterator.build_generator()
 
@@ -197,19 +194,20 @@ def loss_validation(model, critic, valid_iterator, KD_critic):
 
         x, y = prepare_data(seqs_x, seqs_y, cuda=GlobalNames.USE_GPU)
 
-        loss = compute_forward(model=model,
-                               critic=critic,
-                               seqs_x=x,
-                               seqs_y=y,
-                               eval=True,
-                               KD_critic=KD_critic)
+        loss, loss_dict = compute_forward(model=model,
+                                         critic=critic,
+                                         seqs_x=x,
+                                         seqs_y=y,
+                                         eval=True)
 
         if np.isnan(loss):
             WARN("NaN detected!")
 
         sum_loss += float(loss)
+        loss_dict = {key: float(value) for key,value in loss_dict.items()}
+        valid_loss_dict = add_dict_value(valid_loss_dict, loss_dict)
 
-    return float(sum_loss / n_sents)
+    return float(sum_loss / n_sents), {key: value/n_sents for key,value in valid_loss_dict.items()}
 
 
 def bleu_validation(uidx,
@@ -246,7 +244,6 @@ def bleu_validation(uidx,
         x = prepare_data(seqs_x, cuda=GlobalNames.USE_GPU)
 
         with torch.no_grad():
-            # 不用 copy head
             word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha)
 
         word_ids = word_ids.cpu().numpy().tolist()
@@ -449,9 +446,10 @@ def train(FLAGS):
     INFO('Total parameters: {}'.format(params_total))
     INFO('Total parameters (excluding word embeddings): {}'.format(params_with_embedding))
 
-    critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'])
-
-    INFO(critic)
+    # critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'])
+    critic = CombinationCriterion(training_configs['loss_configs'])
+    critic.INFO()
+    # INFO(critic)
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
     # 2. Move to GPU
@@ -498,29 +496,24 @@ def train(FLAGS):
 
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
-    # 7. build online checkpoint distillation
+    # 7. build teacher for online checkpoint distillation and build
     mean_teacher_ema = None
-    KD_critertion = None
-    teacher_model = None
-    best_bleu_step = 0
+    checkpoint_teacher = None
     if training_configs.get('online_checkpoint', False):
 
-        teacher_model = copy.deepcopy(nmt_model)
+        checkpoint_teacher = copy.deepcopy(nmt_model)
         if training_configs.get('teacher_path', None):
             state_dict = torch.load(training_configs.get('teacher_path'))
-            teacher_model.load_state_dict(state_dict, strict=False)
-
-        KD_critertion = WordKDCriterion(teacher_model)
-        KD_critertion.use_KD_loss = True
+            checkpoint_teacher.load_state_dict(state_dict, strict=False)
 
         if training_configs.get('mean_teacher', False):
             mean_teacher_ema = MovingAverage(moving_average_method='ema',
-                                             named_params=teacher_model.named_parameters(),
+                                             named_params=checkpoint_teacher.named_parameters(),
                                              alpha=training_configs['EMA_alpha'])
     # Reload from latest checkpoint
     if FLAGS.reload:
         checkpoint_saver.load_latest(model=nmt_model, optim=optim, lr_scheduler=scheduler,
-                                     collections=model_collections, ma=ma)
+                                     collections=model_collections, ma=ma, mean_teacher_ema=mean_teacher_ema)
 
     # ================================================================================== #
     # Prepare training
@@ -529,13 +522,14 @@ def train(FLAGS):
     uidx = model_collections.get_collection("uidx", [0])[-1]
     bad_count = model_collections.get_collection("bad_count", [0])[-1]
     oom_count = model_collections.get_collection("oom_count", [0])[-1]
+    best_bleu_step = model_collections.get_collection("best_bleu_step", [0])[-1]
 
+    # tensorboard
     summary_writer = SummaryWriter(log_dir=FLAGS.log_path)
 
     cum_samples = 0
     cum_words = 0
     valid_loss = best_valid_loss = float('inf')  # Max Float
-    saving_files = []
 
     # Timer for computing speed
     timer_for_speed = Timer()
@@ -569,21 +563,24 @@ def train(FLAGS):
             cum_words += n_words_t
 
             train_loss = 0.
+            train_loss_dict = {}
             optim.zero_grad()
             try:
                 # Prepare data
                 for seqs_x_t, seqs_y_t in split_shard(seqs_x, seqs_y, split_size=training_configs['update_cycle']):
                     x, y = prepare_data(seqs_x_t, seqs_y_t, cuda=GlobalNames.USE_GPU)
 
-                    loss = compute_forward(model=nmt_model,
-                                           critic=critic,
-                                           seqs_x=x,
-                                           seqs_y=y,
-                                           eval=False,
-                                           normalization=n_samples_t,
-                                           norm_by_words=training_configs["norm_by_words"],
-                                           KD_critic=KD_critertion)
+                    loss, loss_dict = compute_forward(model=nmt_model,
+                                                      critic=critic,
+                                                      seqs_x=x,
+                                                      seqs_y=y,
+                                                      eval=False,
+                                                      normalization=n_samples_t,
+                                                      norm_by_words=training_configs["norm_by_words"]
+                                                      )
                     train_loss += loss / y.size(1)
+                    loss_dict = {key: value/y.size(1) for key,value in loss_dict.items()}
+                    train_loss_dict = add_dict_value(train_loss_dict, loss_dict)
                 optim.step()
             except RuntimeError as e:
                 if 'out of memory' in str(e):
@@ -601,9 +598,14 @@ def train(FLAGS):
 
             training_progress_bar.update(n_samples_t)
             training_progress_bar.set_description(' - (Epc {}, Upd {}) '.format(eidx, uidx))
-            training_progress_bar.set_postfix_str(
-                'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f})'.format(train_loss, valid_loss, best_valid_loss))
+            postfix_str = 'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f})'.format(train_loss, valid_loss, best_valid_loss)
+            for critic_name, loss_value in train_loss_dict.items():
+                postfix_str += (critic_name + 'Loss: {:.2f}').format(loss_value)
+            training_progress_bar.set_postfix_str(postfix_str)
+
             summary_writer.add_scalar("train_loss", scalar_value=train_loss, global_step=uidx)
+            for critic_name, loss_value in train_loss_dict.items():
+                summary_writer.add_scalar('Loss/' + critic_name, scalar_value=loss_value, global_step=uidx)
 
             # ================================================================================== #
             # Display some information
@@ -629,10 +631,11 @@ def train(FLAGS):
                 model_collections.add_to_collection("uidx", uidx)
                 model_collections.add_to_collection("eidx", eidx)
                 model_collections.add_to_collection("bad_count", bad_count)
+                model_collections.add_to_collection("best_bleu_step", best_bleu_step)
 
                 if not is_early_stop:
                     checkpoint_saver.save(global_step=uidx, model=nmt_model, optim=optim, lr_scheduler=scheduler,
-                                          collections=model_collections, ma=ma)
+                                          collections=model_collections, ma=ma, mean_teacher_ema=mean_teacher_ema)
 
             # ================================================================================== #
             # Loss Validation & Learning rate annealing
@@ -643,11 +646,9 @@ def train(FLAGS):
                     origin_state_dict = deepcopy(nmt_model.state_dict())
                     nmt_model.load_state_dict(ma.export_ma_params(), strict=False)
 
-                valid_loss = loss_validation(model=nmt_model,
+                valid_loss, valid_loss_dict = loss_validation(model=nmt_model,
                                              critic=critic,
-                                             valid_iterator=valid_iterator,
-                                             KD_critic=WordKDCriterion
-                                             )
+                                             valid_iterator=valid_iterator)
 
                 model_collections.add_to_collection("history_losses", valid_loss)
 
@@ -655,6 +656,8 @@ def train(FLAGS):
 
                 summary_writer.add_scalar("loss", valid_loss, global_step=uidx)
                 summary_writer.add_scalar("best_loss", min_history_loss, global_step=uidx)
+                for critic_name, loss_value in valid_loss_dict.items():
+                    summary_writer.add_scalar('ValidLoss/' + critic_name, scalar_value=loss_value, global_step=uidx)
 
                 best_valid_loss = min_history_loss
 
@@ -709,14 +712,14 @@ def train(FLAGS):
 
                         # 3. update teacher model
                         best_bleu_step = uidx
-                        if teacher_model is not None:
+                        if checkpoint_teacher is not None:
                             if mean_teacher_ema:
                                 # named_parameters() 和 state_dict() 结果不一样，
                                 # generator不在named_parameters()中 （如果使用shared_weight的话
-                                teacher_model.load_state_dict(mean_teacher_ema.export_ma_params(), strict=False)
+                                checkpoint_teacher.load_state_dict(mean_teacher_ema.export_ma_params(), strict=False)
                             else:
-                                teacher_model.load_state_dict(nmt_model.named_parameters())
-                            KD_critertion.reset_teacher(teacher_model)
+                                checkpoint_teacher.load_state_dict(nmt_model.named_parameters())
+                            critic.reset_teacher(checkpoint_teacher)
                 else:
                     bad_count += 1
 
@@ -733,8 +736,7 @@ def train(FLAGS):
                     del origin_state_dict
 
                 last_bleu_step = uidx
-                if KD_critertion is not None:
-                    KD_critertion.use_KD(best_bleu_step, last_bleu_step)
+                critic.set_use_KD(best_bleu_step != last_bleu_step)
 
                 INFO("{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
                     uidx, valid_loss, valid_bleu, lrate, bad_count
@@ -759,7 +761,12 @@ def translate(FLAGS):
     model_configs = configs['model_configs']
     training_configs = configs['training_configs']
 
-    # TODO 欠缺一个FLAGS更新config的函数
+    # 更新"copy_head"的config文件
+    if FLAGS.copy_head:
+        training_configs['copy_head'] = True
+    else:
+        training_configs['copy_head'] = False
+
     timer = Timer()
     # ================================================================================== #
     # Load Data
@@ -824,7 +831,8 @@ def translate(FLAGS):
 
         with torch.no_grad():
             word_ids = beam_search(nmt_model=nmt_model, beam_size=FLAGS.beam_size, max_steps=FLAGS.max_steps,
-                                   src_seqs=x, alpha=FLAGS.alpha, seed=training_configs['seed'], sample_K=FLAGS.sample_K)
+                                   src_seqs=x, alpha=FLAGS.alpha, seed=training_configs['seed'],
+                                   sample_K=FLAGS.sample_K)
 
         word_ids = word_ids.cpu().numpy().tolist()
 
@@ -881,8 +889,7 @@ def translate(FLAGS):
         for i in range(keep_n):
             with open(outputs[i]) as f:
                 bleu_v = bleu_scorer.corpus_bleu(f)
-
-                print(bleu_v)
+                print("i,bleu: " + str(bleu_v))
     return
 
 

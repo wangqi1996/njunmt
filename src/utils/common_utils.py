@@ -1,9 +1,10 @@
-import os
-import torch
-import time
 import contextlib
 import copy
+import os
+import time
+
 import numpy as np
+import torch
 
 from . import nest
 
@@ -264,3 +265,10 @@ class Saver(object):
                 else:
                     print("Loading {0}".format(name))
                     obj.load_state_dict(state_dict[name])
+
+
+def add_dict_value(dict1, dict2):
+    """ add dict2 value to dict1"""
+    for key, value in dict2:
+        dict1[key] = dict1.get('key', 0) + value
+    return dict1
