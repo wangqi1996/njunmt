@@ -8,15 +8,17 @@ data_configs:
     - "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/test/mt03.ref0"
   bleu_valid_reference: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/test/mt03.ref"
   vocabularies:
-    - type: "word"
-      dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/vocab/zh.json"
-      max_n_words: 30000
-    - type: "word"
-      dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/vocab/en.json"
-      max_n_words: 30000
+    - type: "bpe"
+      dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/zh.json"
+      codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/zh.codes"
+      max_n_words: -1
+    - type: "bpe"
+      dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/en.json"
+      max_n_words: -1
+      codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/en.codes"
   max_len:
-    - 80
-    - 80
+    - 100
+    - 100
   num_refs: 4
   eval_at_char_level: false
 
@@ -31,7 +33,11 @@ model_configs:
   proj_share_weight: true
   label_smoothing: 0.1
 
-
+  loss_configs:
+    - type: "nmt_criterion"
+      label_smoothing: 0.1
+    - type: "wordKD_criterion"
+      init_use_KD: false
 
 optimizer_configs:
   optimizer: "adam"
@@ -43,15 +49,14 @@ optimizer_configs:
     d_model: 512
     warmup_steps: 8000
 
-
 training_configs:
   seed: 1234
   max_epochs: 50
   shuffle: true
   use_bucket: true
-  batch_size: 1024
+  batch_size: 20
   batching_key: "tokens"
-  update_cycle: 4
+  update_cycle: 2
   valid_batch_size: 20
   disp_freq: 1000
   save_freq: 1000
@@ -67,3 +72,6 @@ training_configs:
     sacrebleu_args: "--tokenize none -lc"
     postprocess: false
   early_stop_patience: 50
+  online_checkpoint: true
+  mean_teacher: true
+  EMA_alpha: 0.1

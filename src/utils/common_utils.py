@@ -269,6 +269,6 @@ class Saver(object):
 
 def add_dict_value(dict1, dict2):
     """ add dict2 value to dict1"""
-    for key, value in dict2:
-        dict1[key] = dict1.get('key', 0) + value
+    for key, value in dict2.items():
+        dict1[key] = dict1.get(key, 0) + value
     return dict1

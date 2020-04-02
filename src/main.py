@@ -165,7 +165,8 @@ def compute_forward(model,
         # For compute loss
         with torch.no_grad():
             log_probs = model(seqs_x, y_inp)
-            loss, loss_dict = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True)
+            loss, loss_dict = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True,
+                                     seqs_x=seqs_x, y_inp=y_inp)
         return loss.item(), {name: value.item() for name, value in loss_dict.items()}
 
 
@@ -195,19 +196,19 @@ def loss_validation(model, critic, valid_iterator):
         x, y = prepare_data(seqs_x, seqs_y, cuda=GlobalNames.USE_GPU)
 
         loss, loss_dict = compute_forward(model=model,
-                                         critic=critic,
-                                         seqs_x=x,
-                                         seqs_y=y,
-                                         eval=True)
+                                          critic=critic,
+                                          seqs_x=x,
+                                          seqs_y=y,
+                                          eval=True)
 
         if np.isnan(loss):
             WARN("NaN detected!")
 
         sum_loss += float(loss)
-        loss_dict = {key: float(value) for key,value in loss_dict.items()}
+        loss_dict = {key: float(value) for key, value in loss_dict.items()}
         valid_loss_dict = add_dict_value(valid_loss_dict, loss_dict)
 
-    return float(sum_loss / n_sents), {key: value/n_sents for key,value in valid_loss_dict.items()}
+    return float(sum_loss / n_sents), {key: value / n_sents for key, value in valid_loss_dict.items()}
 
 
 def bleu_validation(uidx,
@@ -447,7 +448,7 @@ def train(FLAGS):
     INFO('Total parameters (excluding word embeddings): {}'.format(params_with_embedding))
 
     # critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'])
-    critic = CombinationCriterion(training_configs['loss_configs'])
+    critic = CombinationCriterion(model_configs['loss_configs'])
     critic.INFO()
     # INFO(critic)
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
@@ -505,6 +506,7 @@ def train(FLAGS):
         if training_configs.get('teacher_path', None):
             state_dict = torch.load(training_configs.get('teacher_path'))
             checkpoint_teacher.load_state_dict(state_dict, strict=False)
+        critic.reset_teacher(checkpoint_teacher)
 
         if training_configs.get('mean_teacher', False):
             mean_teacher_ema = MovingAverage(moving_average_method='ema',
@@ -579,7 +581,7 @@ def train(FLAGS):
                                                       norm_by_words=training_configs["norm_by_words"]
                                                       )
                     train_loss += loss / y.size(1)
-                    loss_dict = {key: value/y.size(1) for key,value in loss_dict.items()}
+                    loss_dict = {key: value / y.size(1) for key, value in loss_dict.items()}
                     train_loss_dict = add_dict_value(train_loss_dict, loss_dict)
                 optim.step()
             except RuntimeError as e:
@@ -598,9 +600,10 @@ def train(FLAGS):
 
             training_progress_bar.update(n_samples_t)
             training_progress_bar.set_description(' - (Epc {}, Upd {}) '.format(eidx, uidx))
-            postfix_str = 'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f})'.format(train_loss, valid_loss, best_valid_loss)
+            postfix_str = 'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f}), '.format(train_loss, valid_loss,
+                                                                                         best_valid_loss)
             for critic_name, loss_value in train_loss_dict.items():
-                postfix_str += (critic_name + 'Loss: {:.2f}').format(loss_value)
+                postfix_str += (critic_name + 'Loss: {:.2f}, ').format(loss_value)
             training_progress_bar.set_postfix_str(postfix_str)
 
             summary_writer.add_scalar("train_loss", scalar_value=train_loss, global_step=uidx)
@@ -647,8 +650,8 @@ def train(FLAGS):
                     nmt_model.load_state_dict(ma.export_ma_params(), strict=False)
 
                 valid_loss, valid_loss_dict = loss_validation(model=nmt_model,
-                                             critic=critic,
-                                             valid_iterator=valid_iterator)
+                                                              critic=critic,
+                                                              valid_iterator=valid_iterator)
 
                 model_collections.add_to_collection("history_losses", valid_loss)
 
@@ -672,9 +675,9 @@ def train(FLAGS):
             # BLEU Validation & Early Stop
 
             if should_trigger_by_steps(global_step=uidx, n_epoch=eidx,
-                                       every_n_step=training_configs['bleu_valid_freq'],
-                                       min_step=training_configs['bleu_valid_warmup'],
-                                       debug=FLAGS.debug):
+                                               every_n_step=training_configs['bleu_valid_freq'],
+                                               min_step=training_configs['bleu_valid_warmup'],
+                                               debug=FLAGS.debug):
 
                 if ma is not None:
                     origin_state_dict = deepcopy(nmt_model.state_dict())
@@ -738,9 +741,13 @@ def train(FLAGS):
                 last_bleu_step = uidx
                 critic.set_use_KD(best_bleu_step != last_bleu_step)
 
-                INFO("{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
+                INFO("\n {0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
                     uidx, valid_loss, valid_bleu, lrate, bad_count
                 ))
+                loss_str = ''
+                for key, value in valid_loss_dict.items():
+                    loss_str += (key + ": " + str(value))
+                INFO(loss_str)
 
         training_progress_bar.close()
 
@@ -763,9 +770,9 @@ def translate(FLAGS):
 
     # 更新"copy_head"的config文件
     if FLAGS.copy_head:
-        training_configs['copy_head'] = True
+        model_configs['copy_head'] = True
     else:
-        training_configs['copy_head'] = False
+        model_configs['copy_head'] = False
 
     timer = Timer()
     # ================================================================================== #
@@ -889,7 +896,7 @@ def translate(FLAGS):
         for i in range(keep_n):
             with open(outputs[i]) as f:
                 bleu_v = bleu_scorer.corpus_bleu(f)
-                print("i,bleu: " + str(bleu_v))
+                print(str(i) + " bleu: " + str(bleu_v))
     return
 
 

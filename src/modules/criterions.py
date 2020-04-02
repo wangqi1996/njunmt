@@ -175,9 +175,11 @@ class CombinationCriterion(Criterion):
                 label_smoothing = loss.get('label_smoothing', 0.0)
                 self.nmt_criterion = NMTCriterion(label_smoothing=label_smoothing)
             elif type == 'wordKD_criterion':
-                teacher = kwargs['teacher']
+                teacher = kwargs.get('teacher', None)
                 init_use_KD = loss.get('init_use_KD', False)
                 self.wordKD_criterion = WordKDCriterion(teacher, init_use_KD)
+            else:
+                assert False, u"不支持的criterion呀~"
 
     def forward(self, inputs, labels=None, normalization=1.0, reduce=True, seqs_x=None, y_inp=None, **kwargs):
         loss = 0

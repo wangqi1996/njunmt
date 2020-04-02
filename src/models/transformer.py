@@ -173,7 +173,7 @@ class Decoder(nn.Module):
 
         self.block_stack = nn.ModuleList([
             DecoderBlock(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
-                         dim_per_head=dim_per_head, copy_head=(copy_head and (layer==n_layers-1)))
+                         dim_per_head=dim_per_head, copy_head=(copy_head and (layer==(n_layers-1))))
             for layer in range(n_layers)])
 
         self.out_layer_norm = nn.LayerNorm(d_model)
