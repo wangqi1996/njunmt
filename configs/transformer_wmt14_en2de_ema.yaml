@@ -61,8 +61,12 @@ training_configs:
   bleu_valid_warmup: 1
   bleu_valid_configs:
     max_steps: 150
-    beam_size: 4
+    beam_size: 5
     alpha: 0.6
     postprocess: False
     sacrebleu_args: "--tokenize none -lc"
   early_stop_patience: 50
+  online_checkpoint: true
+  mean_teacher: true
+  EMA_alpha: 0.1
+  teacher_path: "/home/user_data55/wangdq/code/njunmt/save/KD_ende/transformer.best.final"

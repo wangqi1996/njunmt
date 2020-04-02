@@ -27,7 +27,7 @@ from src.models.base import NMTModel
 from .utils import mask_scores, tensor_gather_helper
 
 
-def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0):
+def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0, sample_K=0, seed=0):
     """
 
     Args:
@@ -55,7 +55,8 @@ def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0):
 
     for t in range(max_steps):
 
-        next_scores, dec_states = nmt_model.decode(final_word_indices.view(batch_size * beam_size, -1), dec_states)
+        next_scores, dec_states = nmt_model.decode(final_word_indices.view(batch_size * beam_size, -1), dec_states,
+                                                   sample_K=sample_K, seed=seed)
 
         next_scores = - next_scores  # convert to negative log_probs
         next_scores = next_scores.view(batch_size, beam_size, -1)

@@ -1,6 +1,9 @@
 import math
+import random
+
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -30,7 +33,7 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class MultiHeadedAttention(nn.Module):
-    def __init__(self, model_dim, head_count, dim_per_head=None, dropout=0.1):
+    def __init__(self, model_dim, head_count, dim_per_head=None, dropout=0.1, copy_head=False):
 
         super(MultiHeadedAttention, self).__init__()
 
@@ -54,6 +57,8 @@ class MultiHeadedAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.final_linear = nn.Linear(self.dim_per_head * head_count, model_dim)
 
+        self.copy_head = copy_head  # control is final attn
+
     def _split_heads(self, x):
 
         batch_size = x.size(0)
@@ -69,7 +74,8 @@ class MultiHeadedAttention(nn.Module):
         return x.transpose(1, 2).contiguous() \
             .view(-1, seq_len, self.head_count * self.dim_per_head)
 
-    def forward(self, key, value, query, mask=None, enc_attn_cache=None, self_attn_cache=None):
+    def forward(self, key, value, query, mask=None, enc_attn_cache=None, self_attn_cache=None,
+                sample_K=0, seed=0):
         """
         Compute the context vector and the attention vectors.
 
@@ -121,7 +127,24 @@ class MultiHeadedAttention(nn.Module):
 
         # 3) Apply attention dropout and compute context vectors.
         attn = self.sm(scores)
+
+        # is copy head? sample_K=0相当于不复制
+        if self.copy_head and sample_K > 0:
+            # random.seed(seed)
+            # [batch_size, head_count]
+            candidate = attn.argmax(-1)[:, :, 0].cpu().numpy()
+            for batch in range(attn.shape[0]):
+                times = np.zeros(attn.shape[-1])
+                for can in candidate[batch]:
+                    times[can] += 1
+
+                if times.max() <= sample_K:
+                    sample_head = random.randint(0, head_count-1)
+                    attn[batch] = attn[batch, sample_head, :, :].unsqueeze(0).repeat(head_count, 1, 1)
+
+
         drop_attn = self.dropout(attn)
+
         context = self._combine_heads(torch.matmul(drop_attn, value_up))
 
         output = self.final_linear(context)

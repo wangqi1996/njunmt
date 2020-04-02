@@ -30,6 +30,7 @@ model_configs:
   dropout: 0.1
   proj_share_weight: true
   label_smoothing: 0.1
+  copy_head: true
 
 optimizer_configs:
   optimizer: "adam"

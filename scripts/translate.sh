@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=$1
+export num=$2
+export SRC="en"
+export TGT="de"
+export LAN="${SRC}2${TGT}"
+export CON="configs/transformer_nist_zh2en_bpe.yaml"
+export MT="mt0${num}"
+export SAVETODIR="/home/user_data55/wangdq/code/njunmt/log/{$LAN}/"
+mkdir -p $SAVETODIR
 
-N=$1
-
-export MODEL_NAME="transformer"
-
-python src.bin.translate \
-    --model_name $MODEL_NAME \
-    --source_path "/home/weihr/NMT_DATA_PY3/1.34M/unittest/MT0$1/src.txt" \
-    --model_path "./save/$MODEL_NAME.best.tpz" \
-    --config_path "./configs.yaml" \
+python -m src.bin.translate \
+    --model_name "transformer" \
+    --source_path "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/test/${MT}.src" \
+    --ref_path "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/test/${MT}.ref" \
+    --model_path "/home/user_data55/wangdq/model/nist_zh2en/save/transformer.best.final" \
+    --config_path "${CON}" \
     --batch_size 20 \
     --beam_size 5 \
-    --saveto "./result/$MODEL_NAME.MT0$1.txt" \
-    --use_gpu
+    --saveto "${SAVETODIR}/output${MT}" \
+    --use_gpu  \
+    --num_refs 4 \
+    --sample_K $3  \
+    --copy_head

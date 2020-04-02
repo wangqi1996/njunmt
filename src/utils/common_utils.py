@@ -240,7 +240,9 @@ class Saver(object):
 
         if len(self.save_list) > self.num_max_keeping:
             out_of_date_state_dict = self.save_list.pop(0)
-            os.remove(os.path.join(self.save_dir, out_of_date_state_dict))
+            checkpoint_path = os.path.join(self.save_dir, out_of_date_state_dict)
+            if os.path.exists(checkpoint_path):
+                os.remove(checkpoint_path)
 
         with open(self.save_prefix, "w") as f:
             f.write("\n".join(self.save_list))

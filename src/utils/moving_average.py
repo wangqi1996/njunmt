@@ -20,8 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import torch
 from collections import OrderedDict
+
+import torch
+
 
 class MovingAverage(object):
     """
@@ -57,7 +59,7 @@ class MovingAverage(object):
             self.named_params[name] = param
             self.named_params_ave[name] = param.data.clone()
 
-    def step(self):
+    def step(self, named_params=None):
 
         if self.moving_average_method == "sma":
             self.num_acc_steps += 1
@@ -65,8 +67,11 @@ class MovingAverage(object):
         else:
             alpha = self.alpha
 
+        if named_params is None:
+            named_params = self.named_params
+
         with torch.no_grad():
-            for name, param in self.named_params.items():
+            for name, param in named_params:
                 self.named_params_ave[name].sub_(alpha * (self.named_params_ave[name] - param))
 
     def export_ma_params(self):

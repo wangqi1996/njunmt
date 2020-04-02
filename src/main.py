@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 import time
@@ -7,6 +8,7 @@ import numpy as np
 import torch
 import yaml
 from tensorboardX import SummaryWriter
+from torch import nn
 from tqdm import tqdm
 
 from src.data.data_iterator import DataIterator
@@ -15,7 +17,7 @@ from src.data.vocabulary import Vocabulary
 from src.decoding import beam_search, ensemble_beam_search
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model
-from src.modules.criterions import NMTCriterion
+from src.modules.criterions import NMTCriterion, WordKDCriterion
 from src.optim import Optimizer
 from src.optim.lr_scheduler import ReduceOnPlateauScheduler, NoamScheduler
 from src.utils.common_utils import *
@@ -128,7 +130,8 @@ def compute_forward(model,
                     seqs_y,
                     eval=False,
                     normalization=1.0,
-                    norm_by_words=False
+                    norm_by_words=False,
+                    KD_critic=None
                     ):
     """
     :type model: nn.Module
@@ -148,6 +151,12 @@ def compute_forward(model,
             log_probs = model(seqs_x, y_inp)
             loss = critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization)
 
+            if KD_critic is not None and KD_critic.use_KD_loss:
+                teacher_output = KD_critic.get_teacher_output(seqs_x, y_inp)
+                KD_loss = KD_critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization,
+                                    teacher_output=teacher_output)
+                loss = loss + KD_loss
+
             if norm_by_words:
                 loss = loss.div(words_norm).sum()
             else:
@@ -164,7 +173,7 @@ def compute_forward(model,
         return loss.item()
 
 
-def loss_validation(model, critic, valid_iterator):
+def loss_validation(model, critic, valid_iterator, KD_critic):
     """
     :type model: Transformer
 
@@ -192,7 +201,8 @@ def loss_validation(model, critic, valid_iterator):
                                critic=critic,
                                seqs_x=x,
                                seqs_y=y,
-                               eval=True)
+                               eval=True,
+                               KD_critic=KD_critic)
 
         if np.isnan(loss):
             WARN("NaN detected!")
@@ -236,6 +246,7 @@ def bleu_validation(uidx,
         x = prepare_data(seqs_x, cuda=GlobalNames.USE_GPU)
 
         with torch.no_grad():
+            # 不用 copy head
             word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha)
 
         word_ids = word_ids.cpu().numpy().tolist()
@@ -487,6 +498,25 @@ def train(FLAGS):
 
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
+    # 7. build online checkpoint distillation
+    mean_teacher_ema = None
+    KD_critertion = None
+    teacher_model = None
+    best_bleu_step = 0
+    if training_configs.get('online_checkpoint', False):
+
+        teacher_model = copy.deepcopy(nmt_model)
+        if training_configs.get('teacher_path', None):
+            state_dict = torch.load(training_configs.get('teacher_path'))
+            teacher_model.load_state_dict(state_dict, strict=False)
+
+        KD_critertion = WordKDCriterion(teacher_model)
+        KD_critertion.use_KD_loss = True
+
+        if training_configs.get('mean_teacher', False):
+            mean_teacher_ema = MovingAverage(moving_average_method='ema',
+                                             named_params=teacher_model.named_parameters(),
+                                             alpha=training_configs['EMA_alpha'])
     # Reload from latest checkpoint
     if FLAGS.reload:
         checkpoint_saver.load_latest(model=nmt_model, optim=optim, lr_scheduler=scheduler,
@@ -504,7 +534,7 @@ def train(FLAGS):
 
     cum_samples = 0
     cum_words = 0
-    valid_loss = best_valid_loss = float('inf') # Max Float
+    valid_loss = best_valid_loss = float('inf')  # Max Float
     saving_files = []
 
     # Timer for computing speed
@@ -551,10 +581,10 @@ def train(FLAGS):
                                            seqs_y=y,
                                            eval=False,
                                            normalization=n_samples_t,
-                                           norm_by_words=training_configs["norm_by_words"])
+                                           norm_by_words=training_configs["norm_by_words"],
+                                           KD_critic=KD_critertion)
                     train_loss += loss / y.size(1)
                 optim.step()
-
             except RuntimeError as e:
                 if 'out of memory' in str(e):
                     print('| WARNING: ran out of memory, skipping batch')
@@ -565,6 +595,9 @@ def train(FLAGS):
 
             if ma is not None and eidx >= training_configs['moving_average_start_epoch']:
                 ma.step()
+
+            if mean_teacher_ema is not None:
+                mean_teacher_ema.step(nmt_model.named_parameters())
 
             training_progress_bar.update(n_samples_t)
             training_progress_bar.set_description(' - (Epc {}, Upd {}) '.format(eidx, uidx))
@@ -613,6 +646,7 @@ def train(FLAGS):
                 valid_loss = loss_validation(model=nmt_model,
                                              critic=critic,
                                              valid_iterator=valid_iterator,
+                                             KD_critic=WordKDCriterion
                                              )
 
                 model_collections.add_to_collection("history_losses", valid_loss)
@@ -672,6 +706,17 @@ def train(FLAGS):
 
                         # 2. record all several best models
                         best_model_saver.save(global_step=uidx, model=nmt_model)
+
+                        # 3. update teacher model
+                        best_bleu_step = uidx
+                        if teacher_model is not None:
+                            if mean_teacher_ema:
+                                # named_parameters() 和 state_dict() 结果不一样，
+                                # generator不在named_parameters()中 （如果使用shared_weight的话
+                                teacher_model.load_state_dict(mean_teacher_ema.export_ma_params(), strict=False)
+                            else:
+                                teacher_model.load_state_dict(nmt_model.named_parameters())
+                            KD_critertion.reset_teacher(teacher_model)
                 else:
                     bad_count += 1
 
@@ -679,12 +724,17 @@ def train(FLAGS):
                     if bad_count >= training_configs['early_stop_patience'] and eidx > 0:
                         is_early_stop = True
                         WARN("Early Stop!")
+                        exit(0)
 
                 summary_writer.add_scalar("bad_count", bad_count, uidx)
 
                 if ma is not None:
                     nmt_model.load_state_dict(origin_state_dict)
                     del origin_state_dict
+
+                last_bleu_step = uidx
+                if KD_critertion is not None:
+                    KD_critertion.use_KD(best_bleu_step, last_bleu_step)
 
                 INFO("{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
                     uidx, valid_loss, valid_bleu, lrate, bad_count
@@ -707,7 +757,9 @@ def translate(FLAGS):
 
     data_configs = configs['data_configs']
     model_configs = configs['model_configs']
+    training_configs = configs['training_configs']
 
+    # TODO 欠缺一个FLAGS更新config的函数
     timer = Timer()
     # ================================================================================== #
     # Load Data
@@ -772,7 +824,7 @@ def translate(FLAGS):
 
         with torch.no_grad():
             word_ids = beam_search(nmt_model=nmt_model, beam_size=FLAGS.beam_size, max_steps=FLAGS.max_steps,
-                                   src_seqs=x, alpha=FLAGS.alpha)
+                                   src_seqs=x, alpha=FLAGS.alpha, seed=training_configs['seed'], sample_K=FLAGS.sample_K)
 
         word_ids = word_ids.cpu().numpy().tolist()
 
@@ -817,6 +869,21 @@ def translate(FLAGS):
                     handles[i].write('%s\n' % trans[i])
                 else:
                     handles[i].write('%s\n' % 'eos')
+
+    if FLAGS.ref_path is not None:
+        bleu_scorer = SacreBLEUScorer(reference_path=FLAGS.ref_path,
+                                      num_refs=FLAGS.num_refs,
+                                      lang_pair=data_configs["lang_pair"],
+                                      sacrebleu_args=training_configs["bleu_valid_configs"]['sacrebleu_args'],
+                                      postprocess=training_configs["bleu_valid_configs"]['postprocess']
+                                      )
+
+        for i in range(keep_n):
+            with open(outputs[i]) as f:
+                bleu_v = bleu_scorer.corpus_bleu(f)
+
+                print(bleu_v)
+    return
 
 
 def ensemble_translate(FLAGS):

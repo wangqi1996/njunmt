@@ -1,7 +1,8 @@
 import random
-from typing import Iterator
-import numpy as np
 from itertools import count
+from typing import Iterator
+
+import numpy as np
 
 from src.utils.common_utils import GlobalNames
 from .dataset import Record, zip_records

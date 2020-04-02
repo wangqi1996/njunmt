@@ -119,3 +119,43 @@ class NMTCriterion(Criterion):
         loss = self.criterion(scores, gtruth).view((batch_size, -1)).sum(-1)
 
         return loss
+
+
+class WordKDCriterion(Criterion):
+    """
+    use word-level knowledge distillation loss function
+    """
+
+    def __init__(self, teacher=None):
+        super().__init__()
+        self.teacher = teacher
+        self.criterion = nn.KLDivLoss(size_average=False, reduce=False)
+        self.use_KD_loss = False
+
+    def reset_teacher(self, teacher=None):
+        self.teacher = teacher
+
+    def _compute_loss(self, inputs, labels, teacher_output=None, **kwargs):
+        batch_size = labels.size(0)
+        loss = self.criterion(inputs, teacher_output).view((batch_size, -1)).sum(-1)
+        return loss
+
+    def get_teacher_output(self, input, y_inp):
+        assert self.teacher is not None, u"must have a teacher when calculate KD"
+        output = self.teacher(input, y_inp, log_probs=False)
+        return output
+
+    def use_KD(self, best_bleu_step, last_bleu_step):
+        if best_bleu_step == last_bleu_step:
+            self.use_KD_loss = False
+        else:
+            self.use_KD_loss = True
+
+class CombinationCriterion(Criterion):
+    """
+    use multi loss function for train
+    """
+    def __init__(self, loss_config):
+        """
+        """
+        for

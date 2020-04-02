@@ -43,9 +43,9 @@ class Encoder(nn.Module):
 
         # Use PAD
         self.embeddings = Embeddings(num_embeddings=n_words,
-                                    embedding_dim=input_size,
-                                    dropout=0.0,
-                                    add_position_embedding=False)
+                                     embedding_dim=input_size,
+                                     dropout=0.0,
+                                     add_position_embedding=False)
 
         self.gru = RNN(type="gru", batch_first=True, input_size=input_size, hidden_size=hidden_size,
                        bidirectional=True)
@@ -82,9 +82,9 @@ class Decoder(nn.Module):
         # self.context_size = hidden_size * 2
 
         self.embeddings = Embeddings(num_embeddings=n_words,
-                                    embedding_dim=input_size,
-                                    dropout=0.0,
-                                    add_position_embedding=False)
+                                     embedding_dim=input_size,
+                                     dropout=0.0,
+                                     add_position_embedding=False)
 
         self.cgru_cell = CGRUCell(input_size=input_size, hidden_size=hidden_size, context_size=context_size)
 
@@ -196,7 +196,6 @@ class Generator(nn.Module):
 
             return x_2d.view(x_size)
 
-
     def forward(self, input, log_probs=True):
         """
         input == > Linear == > LogSoftmax
@@ -222,7 +221,7 @@ class DL4MT(NMTModel):
         self.encoder = Encoder(n_words=n_src_vocab, input_size=d_word_vec, hidden_size=d_model)
 
         self.decoder = Decoder(n_words=n_tgt_vocab, input_size=d_word_vec,
-                               hidden_size=d_model, context_size=d_model*2,
+                               hidden_size=d_model, context_size=d_model * 2,
                                dropout_rate=dropout, bridge_type=bridge_type)
 
         if proj_share_weight is False:
@@ -269,7 +268,7 @@ class DL4MT(NMTModel):
 
         return {"dec_hiddens": dec_init, "dec_caches": dec_caches, "ctx": ctx, "ctx_mask": ctx_mask}
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
 
         ctx = dec_states['ctx']
         ctx_mask = dec_states['ctx_mask']

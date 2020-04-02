@@ -66,6 +66,7 @@ def ensemble_beam_search(nmt_models: List[NMTModel], beam_size, max_steps, src_s
             next_probs_group_.append(next_probs)
             dec_states_group_.append(dec_states)
 
+        # 取平均
         next_scores = torch.log(sum(next_probs_group_) / len(next_probs_group_))
         next_scores = - next_scores  # convert to negative log_probs
         next_scores = next_scores.view(batch_size, beam_size, -1)

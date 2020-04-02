@@ -113,13 +113,17 @@ class Encoder(nn.Module):
 class DecoderBlock(nn.Module):
     ''' Compose with three layers '''
 
-    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1):
+    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, copy_head=False, final=False):
         super(DecoderBlock, self).__init__()
 
         self.slf_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
                                              dim_per_head=dim_per_head)
+        if final and copy_head:
+            copy_head = True
+        else:
+            copy_head = False
         self.ctx_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
-                                             dim_per_head=dim_per_head)
+                                             dim_per_head=dim_per_head, copy_head=copy_head)
         self.pos_ffn = PositionwiseFeedForward(size=d_model, hidden_size=d_inner_hid)
 
         self.layer_norm_1 = nn.LayerNorm(d_model)
@@ -131,7 +135,7 @@ class DecoderBlock(nn.Module):
         return self.ctx_attn.compute_cache(enc_output, enc_output)
 
     def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None,
-                enc_attn_cache=None, self_attn_cache=None):
+                enc_attn_cache=None, self_attn_cache=None, sample_K=None, seed=None):
         # Args Checks
         input_batch, input_len, _ = dec_input.size()
 
@@ -147,7 +151,8 @@ class DecoderBlock(nn.Module):
 
         query_norm = self.layer_norm_2(query)
         mid, attn, enc_attn_cache = self.ctx_attn(enc_output, enc_output, query_norm,
-                                                  mask=dec_enc_attn_mask, enc_attn_cache=enc_attn_cache)
+                                                  mask=dec_enc_attn_mask, enc_attn_cache=enc_attn_cache,
+                                                  sample_K=sample_K, seed=seed)
 
         output = self.pos_ffn(self.dropout(mid) + query)
 
@@ -159,7 +164,7 @@ class Decoder(nn.Module):
 
     def __init__(
             self, n_tgt_vocab, n_layers=6, n_head=8,
-            d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None, dropout=0.1):
+            d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None, dropout=0.1, copy_head=False):
 
         super(Decoder, self).__init__()
 
@@ -172,8 +177,8 @@ class Decoder(nn.Module):
 
         self.block_stack = nn.ModuleList([
             DecoderBlock(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
-                         dim_per_head=dim_per_head)
-            for _ in range(n_layers)])
+                         dim_per_head=dim_per_head, final=layer == n_layers - 1, copy_head=copy_head)
+            for layer in range(n_layers)])
 
         self.out_layer_norm = nn.LayerNorm(d_model)
 
@@ -186,7 +191,8 @@ class Decoder(nn.Module):
         else:
             return self._dim_per_head
 
-    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None):
+    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None, sample_K=None,
+                seed=None):
 
         batch_size, tgt_len = tgt_seq.size()
 
@@ -219,7 +225,9 @@ class Decoder(nn.Module):
                                       dec_slf_attn_mask,
                                       dec_enc_attn_mask,
                                       enc_attn_cache=enc_attn_caches[i] if enc_attn_caches is not None else None,
-                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None)
+                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None,
+                                      sample_K=sample_K,
+                                      seed=seed)
 
             new_self_attn_caches += [self_attn_cache]
             new_enc_attn_caches += [enc_attn_cache]
@@ -278,7 +286,7 @@ class Transformer(NMTModel):
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_layers=6, n_head=8,
             d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None,
-            dropout=0.1, proj_share_weight=True, **kwargs):
+            dropout=0.1, proj_share_weight=True, copy_head=False, **kwargs):
 
         super(Transformer, self).__init__()
 
@@ -290,7 +298,7 @@ class Transformer(NMTModel):
         self.decoder = Decoder(
             n_tgt_vocab, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
-            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head)
+            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head, copy_head=copy_head)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -310,7 +318,7 @@ class Transformer(NMTModel):
     def forward(self, src_seq, tgt_seq, log_probs=True):
 
         enc_output, enc_mask = self.encoder(src_seq)
-        dec_output, _, _ = self.decoder(tgt_seq, enc_output, enc_mask)
+        dec_output, _, _ = self.decoder(tgt_seq, enc_output, enc_mask, sample_K=0)
 
         return self.generator(dec_output, log_probs=log_probs)
 
@@ -337,7 +345,7 @@ class Transformer(NMTModel):
             "slf_attn_caches": None
         }
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
 
         ctx = dec_states["ctx"]
         ctx_mask = dec_states['ctx_mask']
@@ -346,7 +354,9 @@ class Transformer(NMTModel):
 
         dec_output, slf_attn_caches, enc_attn_caches = self.decoder(tgt_seq=tgt_seq, enc_output=ctx, enc_mask=ctx_mask,
                                                                     enc_attn_caches=enc_attn_caches,
-                                                                    self_attn_caches=slf_attn_caches)
+                                                                    self_attn_caches=slf_attn_caches,
+                                                                    seed=seed,
+                                                                    sample_K=sample_K)
 
         next_scores = self.generator(dec_output[:, -1].contiguous(), log_probs=log_probs)
 

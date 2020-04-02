@@ -124,16 +124,15 @@ class Dataset(object):
         """
         raise NotImplementedError
 
-    def _data_iter(self, shuffle):
-
-        if shuffle:
+    def _data_iter(self):
+        if self.shuffle:
             return shuffle(self.data_path)
         else:
             return open(self.data_path)
 
-    def data_iter(self, shuffle=False):
+    def data_iter(self):
 
-        f_handles = self._data_iter(shuffle=shuffle)
+        f_handles = self._data_iter()
 
         if not isinstance(f_handles, collections.Sequence):
             f_handles = [f_handles]
@@ -212,9 +211,8 @@ class ZipDataset(Dataset):
     def __len__(self):
         return len(self.datasets[0])
 
-    def _data_iter(self, shuffle):
-
-        if shuffle:
+    def _data_iter(self):
+        if self.shuffle:
             return shuffle(*self.data_path)
         else:
             return [open(dp) for dp in self.data_path]

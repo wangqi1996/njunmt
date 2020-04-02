@@ -1,4 +1,5 @@
 import argparse
+
 from src.main import translate
 
 parser = argparse.ArgumentParser()
@@ -35,8 +36,19 @@ parser.add_argument("--max_steps", type=int, default=150,
 parser.add_argument("--alpha", type=float, default=-1.0,
                     help="""Factor to do length penalty. Negative value means close length penalty.""")
 
-def run(**kwargs):
+parser.add_argument("--sample_K", type=int, default=3,
+                    help="""copy head sample K, model confusing""")
 
+parser.add_argument("--copy_head", action="store_true")
+
+parser.add_argument("--ref_path", type=str,
+                    help="""ref path""")
+
+parser.add_argument("--num_refs", type=int, default=1,
+                    help="""num_refs""")
+
+
+def run(**kwargs):
     args = parser.parse_args()
 
     # Modify some options.
@@ -44,6 +56,7 @@ def run(**kwargs):
         setattr(args, k, v)
 
     translate(args)
+
 
 if __name__ == '__main__':
     run()
