@@ -74,9 +74,9 @@ class Vocabulary(object):
 
         return self._id2token[word_id]
 
-    def sent2ids(self, sent):
+    def sent2ids(self, sent, is_train=False):
 
-        tokens = self.tokenizer.tokenize(sent)
+        tokens = self.tokenizer.tokenize(sent, is_train=is_train)
 
         return [self.token2id(t) for t in tokens]
 

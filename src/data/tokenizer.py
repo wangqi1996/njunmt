@@ -1,5 +1,7 @@
-from .bpe import Bpe
 import re
+
+from .bpe import Bpe
+
 
 class _Tokenizer(object):
     """The abstract class of Tokenizer
@@ -12,7 +14,7 @@ class _Tokenizer(object):
     def __init__(self, **kwargs):
         pass
 
-    def tokenize(self, sent):
+    def tokenize(self, sent, is_train=False):
         raise NotImplementedError
 
     def detokenize(self, tokens):
@@ -24,7 +26,7 @@ class WordTokenizer(_Tokenizer):
     def __init__(self, **kwargs):
         super(WordTokenizer, self).__init__(**kwargs)
 
-    def tokenize(self, sent):
+    def tokenize(self, sent, is_train=False):
         return sent.strip().split()
 
     def detokenize(self, tokens):
@@ -47,12 +49,18 @@ class BPETokenizer(_Tokenizer):
         else:
             self.bpe = None
 
-    def tokenize(self, sent):
+        self.bpe_dropout = kwargs.get('bpe_dropout', 0)
+
+    def tokenize(self, sent, is_train=False):
 
         if self.bpe is None:
             return sent.strip().split()
         else:
-            return sum([self.bpe.segment_word(w) for w in sent.strip().split()], [])
+            if is_train:
+                bpe_dropout = self.bpe_dropout
+            else:
+                bpe_dropout = 0.0
+            return sum([self.bpe.segment_word(w, bpe_dropout=bpe_dropout) for w in sent.strip().split()], [])
 
     def detokenize(self, tokens):
 
@@ -70,3 +78,7 @@ class Tokenizer(object):
         else:
             print("Unknown tokenizer type {0}".format(type))
             raise ValueError
+
+#
+# if __name__ == '__main__':
+#     tokenizer = Tokenizer()

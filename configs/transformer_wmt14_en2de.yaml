@@ -12,10 +12,12 @@ data_configs:
       max_n_words: -1
       dict_path: "/home/public_data/nmtdata/wmt14_en-de_data_selection/vocab.json"
       codes: "/home/public_data/nmtdata/wmt14_en-de_data_selection/bpe.32000"
+      bpe_dropout: 0.1
     - type: "bpe"
       dict_path: "/home/public_data/nmtdata/wmt14_en-de_data_selection/vocab.json"
       codes: "/home/public_data/nmtdata/wmt14_en-de_data_selection/bpe.32000"
       max_n_words: -1
+      bpe_dropout: 0.1
   max_len:
     - -1
     - -1
@@ -32,6 +34,10 @@ model_configs:
   dropout: 0.1
   proj_share_weight: true
   label_smoothing: 0.1
+
+  loss_configs:
+    - type: "nmt_criterion"
+      label_smoothing: 0.1
 
 optimizer_configs:
   optimizer: "adam"

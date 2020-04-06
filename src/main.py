@@ -379,10 +379,12 @@ def train(FLAGS):
         TextLineDataset(data_path=data_configs['train_data'][0],
                         vocabulary=vocab_src,
                         max_len=data_configs['max_len'][0],
+                        is_train_data=True,
                         ),
         TextLineDataset(data_path=data_configs['train_data'][1],
                         vocabulary=vocab_tgt,
                         max_len=data_configs['max_len'][1],
+                        is_train_data=True,
                         ),
         shuffle=training_configs['shuffle']
     )
@@ -390,9 +392,11 @@ def train(FLAGS):
     valid_bitext_dataset = ZipDataset(
         TextLineDataset(data_path=data_configs['valid_data'][0],
                         vocabulary=vocab_src,
+                        is_train_data=False,
                         ),
         TextLineDataset(data_path=data_configs['valid_data'][1],
                         vocabulary=vocab_tgt,
+                        is_train_data=False,
                         )
     )
 
@@ -446,11 +450,11 @@ def train(FLAGS):
     params_with_embedding = sum([p.numel() for n, p in nmt_model.named_parameters() if n.find('embedding') == -1])
     INFO('Total parameters: {}'.format(params_total))
     INFO('Total parameters (excluding word embeddings): {}'.format(params_with_embedding))
-
     # critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'])
     critic = CombinationCriterion(model_configs['loss_configs'])
     critic.INFO()
     # INFO(critic)
+
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
     # 2. Move to GPU
@@ -603,7 +607,7 @@ def train(FLAGS):
             postfix_str = 'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f}), '.format(train_loss, valid_loss,
                                                                                          best_valid_loss)
             for critic_name, loss_value in train_loss_dict.items():
-                postfix_str += (critic_name + 'Loss: {:.2f}, ').format(loss_value)
+                postfix_str += (critic_name + ': {:.2f}, ').format(loss_value)
             training_progress_bar.set_postfix_str(postfix_str)
 
             summary_writer.add_scalar("train_loss", scalar_value=train_loss, global_step=uidx)
@@ -786,7 +790,8 @@ def translate(FLAGS):
     vocab_tgt = Vocabulary(**data_configs["vocabularies"][1])
 
     valid_dataset = TextLineDataset(data_path=FLAGS.source_path,
-                                    vocabulary=vocab_src)
+                                    vocabulary=vocab_src,
+                                    is_train_data=False)
 
     valid_iterator = DataIterator(dataset=valid_dataset,
                                   batch_size=FLAGS.batch_size,

@@ -156,7 +156,8 @@ class TextLineDataset(Dataset):
                  data_path,
                  vocabulary,
                  max_len=-1,
-                 shuffle=False
+                 shuffle=False,
+                 is_train_data=True
                  ):
 
         super(TextLineDataset, self).__init__()
@@ -165,6 +166,7 @@ class TextLineDataset(Dataset):
         self._vocab = vocabulary # type: Vocabulary
         self._max_len = max_len
         self.shuffle = shuffle
+        self.is_train_data = is_train_data
 
         with open(self._data_path) as f:
             self.num_lines = sum(1 for _ in f)
@@ -182,7 +184,7 @@ class TextLineDataset(Dataset):
 
         :type line: str
         """
-        line = self._vocab.sent2ids(line)
+        line = self._vocab.sent2ids(line, self.is_train_data)
 
         if 0 < self._max_len < len(line):
             return None

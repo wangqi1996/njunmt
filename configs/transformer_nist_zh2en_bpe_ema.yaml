@@ -54,9 +54,9 @@ training_configs:
   max_epochs: 50
   shuffle: true
   use_bucket: true
-  batch_size: 20
+  batch_size: 2048
   batching_key: "tokens"
-  update_cycle: 2
+  update_cycle: 4
   valid_batch_size: 20
   disp_freq: 1000
   save_freq: 1000
