@@ -15,6 +15,7 @@ from src.data.data_iterator import DataIterator
 from src.data.dataset import TextLineDataset, ZipDataset
 from src.data.vocabulary import Vocabulary
 from src.decoding import beam_search, ensemble_beam_search
+from src.distributed.parallel import DataParallelModel, DataParallelCriterion
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model
 from src.modules.criterions import NMTCriterion, CombinationCriterion
@@ -167,7 +168,7 @@ def compute_forward(model,
             log_probs = model(seqs_x, y_inp)
             loss, loss_dict = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True,
                                      seqs_x=seqs_x, y_inp=y_inp)
-        return loss.item(), {name: value.item() for name, value in loss_dict.items()}
+        return loss.sum().item(), {name: value.sum().item() for name, value in loss_dict.items()}
 
 
 def loss_validation(model, critic, valid_iterator):
@@ -456,6 +457,11 @@ def train(FLAGS):
     # INFO(critic)
 
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
+
+    # 多卡训练
+    if FLAGS.data_parallel:
+        nmt_model = DataParallelModel(nmt_model)
+        critic = DataParallelCriterion(critic)
 
     # 2. Move to GPU
     if GlobalNames.USE_GPU:
