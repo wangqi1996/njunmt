@@ -174,7 +174,6 @@ def should_trigger_by_steps(global_step,
     When to trigger bleu evaluation.
     """
     # Debug mode
-
     if debug:
         return True
 

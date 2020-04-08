@@ -67,6 +67,15 @@ class BPETokenizer(_Tokenizer):
         return re.sub(r"@@\s|@@$", "", " ".join(tokens))
         # return ' '.join(tokens).replace("@@ ", "")
 
+class CharTokenizer(_Tokenizer):
+    def __init__(self, **kwargs):
+        super(CharTokenizer, self).__init__(**kwargs)
+
+    def tokenize(self, sent, is_train=False):
+        return list(sent.strip())
+
+    def detokenize(self, tokens):
+        return ''.join(tokens)
 
 class Tokenizer(object):
 
@@ -75,6 +84,8 @@ class Tokenizer(object):
             return WordTokenizer(**kwargs)
         elif type == "bpe":
             return BPETokenizer(**kwargs)
+        elif type == 'char':
+            return CharTokenizer(**kwargs)
         else:
             print("Unknown tokenizer type {0}".format(type))
             raise ValueError

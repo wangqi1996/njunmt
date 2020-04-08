@@ -679,9 +679,9 @@ def train(FLAGS):
             # BLEU Validation & Early Stop
 
             if should_trigger_by_steps(global_step=uidx, n_epoch=eidx,
-                                               every_n_step=training_configs['bleu_valid_freq'],
-                                               min_step=training_configs['bleu_valid_warmup'],
-                                               debug=FLAGS.debug):
+                                       every_n_step=training_configs['bleu_valid_freq'],
+                                       min_step=training_configs['bleu_valid_warmup'],
+                                       debug=FLAGS.debug):
 
                 if ma is not None:
                     origin_state_dict = deepcopy(nmt_model.state_dict())
@@ -745,7 +745,7 @@ def train(FLAGS):
                 last_bleu_step = uidx
                 critic.set_use_KD(best_bleu_step != last_bleu_step)
 
-                INFO("\n {0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
+                INFO("{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
                     uidx, valid_loss, valid_bleu, lrate, bad_count
                 ))
                 loss_str = ''
