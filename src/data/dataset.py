@@ -63,6 +63,7 @@ class Record(object):
     def n_fields(self):
         return len(self.fields)
 
+
 def zip_records(*records: Record):
     """
     Combine several records into one single record. The key of the new record is the
@@ -161,7 +162,7 @@ class TextLineDataset(Dataset):
         self._max_len = max_len
 
         self.set_size(get_num_of_lines(self._data_path))
-        self.is_train_data=is_train_dataset
+        self.is_train_data = is_train_dataset
 
     def _data_iter(self):
         return open(self._data_path)

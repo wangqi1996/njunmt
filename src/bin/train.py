@@ -1,7 +1,7 @@
 import argparse
 
 from src.main import train
-from . import auto_mkdir
+from src.bin import auto_mkdir
 
 parser = argparse.ArgumentParser()
 

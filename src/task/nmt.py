@@ -1,8 +1,9 @@
 import itertools
-import numpy as np
 import os
 import random
 import time
+
+import numpy as np
 import torch
 import yaml
 from tensorboardX import SummaryWriter
@@ -596,7 +597,8 @@ def train(flags):
     INFO('Building model...')
     timer.tic()
     nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
-                            n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, **model_configs)
+                            n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
+                            **model_configs)
     INFO(nmt_model)
 
     critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'], padding_idx=vocab_tgt.pad)
@@ -976,7 +978,8 @@ def translate(flags):
     INFO('Building model...')
     timer.tic()
     nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
-                            n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, **model_configs)
+                            n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
+                            **model_configs)
     nmt_model.eval()
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
@@ -1040,6 +1043,7 @@ def translate(flags):
                 with open(outputs[i]) as f:
                     bleu_v = bleu_scorer.corpus_bleu(f)
                     print(str(i) + " bleu: " + str(bleu_v))
+
 
 def ensemble_translate(flags):
     Constants.USE_GPU = flags.use_gpu

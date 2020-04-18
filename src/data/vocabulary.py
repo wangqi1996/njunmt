@@ -49,6 +49,8 @@ class Vocabulary(object):
 
             return BPEVocabulary(dictionary=dictionary, max_n_words=max_n_words, codes=kwargs['codes'],
                                  bpe_dropout=kwargs.get('bpe_dropout', 0.0))
+        elif type == 'char':
+            return CharVocabulary(dictionary=dictionary, max_n_words=max_n_words)
         else:
             raise ValueError("Unknown vocabulary type {0}".format(type))
 
@@ -124,3 +126,12 @@ class BPEVocabulary(Vocabulary):
 
     def detokenize(self, tokens: List[str]) -> str:
         return re.sub(r"@@\s|@@$", "", " ".join(tokens))
+
+
+class CharVocabulary(Vocabulary):
+
+    def tokenize(self, sent: str, is_train=False) -> List[str]:
+        return list(sent.strip())
+
+    def detokenize(self, tokens: List[str]) -> str:
+        return ''.join(tokens)

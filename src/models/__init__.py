@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from src.models.transformer_char import Transformer_Char
 from .dl4mt import *
 from .transformer import *
 
@@ -23,6 +23,7 @@ __all__ = [
 MODEL_CLS = {
     "Transformer": Transformer,
     "DL4MT": DL4MT,
+    "Transformer_Char": Transformer_Char
 }
 
 DEFAULT_CONFIGS = {

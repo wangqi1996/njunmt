@@ -12,15 +12,10 @@ data_configs:
       dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/zh.json"
       codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/zh.codes"
       max_n_words: -1
-      bpe_dropout: 0.1
     - type: "bpe"
       dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/en.json"
       max_n_words: -1
       codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/en.codes"
-      bpe_dropout: 0.1
-    - type: "char"
-      dict_path: "/home/user_data55/wangdq/code/njunmt_dist/nist/nist/vocab/zh.char.json"
-      max_n_words: -1
 
   max_len:
     - 100
@@ -29,7 +24,7 @@ data_configs:
   eval_at_char_level: false
 
 model_configs:
-  model: Transformer
+  model: Transformer_Char
   n_layers: 6
   n_head: 8
   d_word_vec: 512
