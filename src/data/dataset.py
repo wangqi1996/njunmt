@@ -35,8 +35,8 @@ __all__ = [
 
 def get_num_of_lines(filename):
     """Get number of lines of a file."""
-    f = open(filename, "r+")
-    buf = mmap.mmap(f.fileno(), 0)
+    f = open(filename, "r")
+    buf = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
     lines = 0
     readline = buf.readline
     while readline():
@@ -152,6 +152,7 @@ class TextLineDataset(Dataset):
                  data_path,
                  vocabulary,
                  max_len=-1,
+                 is_train_dataset=False
                  ):
         super(TextLineDataset, self).__init__()
 
@@ -160,6 +161,7 @@ class TextLineDataset(Dataset):
         self._max_len = max_len
 
         self.set_size(get_num_of_lines(self._data_path))
+        self.is_train_data=is_train_dataset
 
     def _data_iter(self):
         return open(self._data_path)
@@ -170,7 +172,7 @@ class TextLineDataset(Dataset):
 
         :type line: str
         """
-        line = self._vocab.sent2ids(line)
+        line = self._vocab.sent2ids(line, is_train=self.is_train_data)
 
         if 0 < self._max_len < len(line):
             return None

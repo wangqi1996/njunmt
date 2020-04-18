@@ -25,13 +25,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.modules.tensor_utils import tile_batch
 from src.decoding.utils import tensor_gather_helper
 from src.models.base import NMTModel
 from src.modules.activation import GELU
 from src.modules.attention import MultiHeadedAttention
 from src.modules.basic import BottleLinear as Linear
 from src.modules.embeddings import Embeddings
+from src.modules.tensor_utils import tile_batch
 from src.utils import nest
 from src.utils.common_utils import Constants
 
@@ -158,8 +158,10 @@ class EncoderAttentionBlock(Block):
         self.transform_layer = MultiHeadedAttention(model_dim=model_dim, head_count=head_count,
                                                     dim_per_head=dim_per_head, dropout=attn_dropout)
 
-    def _transform(self, dec_hidden, context, mask=None, enc_attn_cache=None):
-        return self.transform_layer(context, context, dec_hidden, mask=mask, enc_attn_cache=enc_attn_cache)
+    def _transform(self, dec_hidden, context, mask=None, enc_attn_cache=None, sample_K=0, seed=0):
+        return self.transform_layer(context, context, dec_hidden, mask=mask, enc_attn_cache=enc_attn_cache,
+                                    sample_K=sample_K,
+                                    seed=seed)
 
 
 class PositionwiseFeedForwardBlock(Block):
@@ -260,7 +262,7 @@ class DecoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None,
-                enc_attn_cache=None, self_attn_cache=None):
+                enc_attn_cache=None, self_attn_cache=None, sample_K=0, seed=0):
         # Args Checks
         input_batch, input_len, _ = dec_input.size()
 
@@ -269,7 +271,8 @@ class DecoderLayer(nn.Module):
         query, _, self_attn_cache = self.slf_attn(dec_input, mask=slf_attn_mask, self_attn_cache=self_attn_cache)
 
         attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
-                                                                  enc_attn_cache=enc_attn_cache)
+                                                                  enc_attn_cache=enc_attn_cache, sample_K=sample_K,
+                                                                  seed=seed)
 
         output = self.pos_ffn(attn_values)
 
@@ -313,7 +316,8 @@ class Decoder(nn.Module):
         else:
             return self._dim_per_head
 
-    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None):
+    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None, sample_K=0,
+                seed=0):
 
         batch_size, tgt_len = tgt_seq.size()
 
@@ -343,13 +347,20 @@ class Decoder(nn.Module):
         new_self_attn_caches = []
         new_enc_attn_caches = []
         for i in range(self.num_layers):
+            # copy head occur when last layer
+            if i == self.num_layers - 1:
+                layer_sample_K = sample_K
+            else:
+                layer_sample_K = 0
+
             output, attn, self_attn_cache, enc_attn_cache \
                 = self.layer_stack[i](output,
                                       enc_output,
                                       dec_slf_attn_mask,
                                       dec_enc_attn_mask,
                                       enc_attn_cache=enc_attn_caches[i] if enc_attn_caches is not None else None,
-                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None)
+                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None,
+                                      sample_K=layer_sample_K, seed=seed)
 
             new_self_attn_caches += [self_attn_cache]
             new_enc_attn_caches += [enc_attn_cache]
@@ -479,7 +490,7 @@ class Transformer(NMTModel):
             "slf_attn_caches": None
         }
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, sample_K=0, seed=0):
 
         ctx = dec_states["ctx"]
         ctx_mask = dec_states['ctx_mask']
@@ -488,7 +499,8 @@ class Transformer(NMTModel):
 
         dec_output, slf_attn_caches, enc_attn_caches = self.decoder(tgt_seq=tgt_seq, enc_output=ctx, enc_mask=ctx_mask,
                                                                     enc_attn_caches=enc_attn_caches,
-                                                                    self_attn_caches=slf_attn_caches)
+                                                                    self_attn_caches=slf_attn_caches, sample_K=sample_K,
+                                                                    seed=seed)
 
         next_scores = self.generator(dec_output[:, -1].contiguous(), log_probs=log_probs)
 

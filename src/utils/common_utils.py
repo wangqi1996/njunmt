@@ -1,12 +1,11 @@
 import contextlib
 import copy
+import numpy as np
 import os
 import time
-from collections import OrderedDict
-
-import numpy as np
 import torch
 import torch.nn as nn
+from collections import OrderedDict
 
 from . import nest
 
@@ -62,8 +61,6 @@ class Constants:
     EOS = 1
     BOS = 2
     UNK = 3
-
-
 
 
 time_format = '%Y-%m-%d %H:%M:%S'
@@ -253,7 +250,9 @@ class Saver(object):
 
         if len(self.save_list) > self.num_max_keeping:
             out_of_date_state_dict = self.save_list.pop(0)
-            os.remove(os.path.join(self.save_dir, out_of_date_state_dict))
+            checkpoint_path = os.path.join(self.save_dir, out_of_date_state_dict)
+            if os.path.exists(checkpoint_path):
+                os.remove(checkpoint_path)
 
         with open(self.save_prefix, "w") as f:
             f.write("\n".join(self.save_list))
@@ -383,6 +382,7 @@ def register(name: str, registry: dict):
         name (str): the registering name of this class.
         registry (dict): a dict to register classess.
     """
+
     def register_cls(cls):
         if name in registry:
             raise KeyError("{0} has already been registered!")

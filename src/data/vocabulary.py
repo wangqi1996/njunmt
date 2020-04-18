@@ -1,8 +1,9 @@
+import json
 import os
 import re
 from typing import List
+
 from .bpe import Bpe
-import json
 
 RESERVED_TOKENS_DICT = {
     "<PAD>": (0, 0),
@@ -46,11 +47,12 @@ class Vocabulary(object):
             assert "codes" in kwargs
             assert os.path.exists(kwargs['codes'])
 
-            return BPEVocabulary(dictionary=dictionary, max_n_words=max_n_words, codes=kwargs['codes'])
+            return BPEVocabulary(dictionary=dictionary, max_n_words=max_n_words, codes=kwargs['codes'],
+                                 bpe_dropout=kwargs.get('bpe_dropout', 0.0))
         else:
             raise ValueError("Unknown vocabulary type {0}".format(type))
 
-    def tokenize(self, sent: str) -> List[str]:
+    def tokenize(self, sent: str, is_train=False) -> List[str]:
         raise NotImplementedError
 
     def detokenize(self, tokens: List[str]) -> str:
@@ -84,9 +86,9 @@ class Vocabulary(object):
 
         return self._id2token[word_id]
 
-    def sent2ids(self, sent):
+    def sent2ids(self, sent, is_train=False):
 
-        tokens = self.tokenize(sent)
+        tokens = self.tokenize(sent, is_train)
 
         return [self.token2id(t) for t in tokens]
 
@@ -99,7 +101,7 @@ class Vocabulary(object):
 
 class WordVocabulary(Vocabulary):
 
-    def tokenize(self, sent: str) -> List[str]:
+    def tokenize(self, sent: str, is_train=False) -> List[str]:
         return sent.strip().split()
 
     def detokenize(self, tokens: List[str]) -> str:
@@ -108,12 +110,17 @@ class WordVocabulary(Vocabulary):
 
 class BPEVocabulary(Vocabulary):
 
-    def __init__(self, dictionary: dict, codes: str, max_n_words=-1):
+    def __init__(self, dictionary: dict, codes: str, max_n_words=-1, bpe_dropout=0.0):
         super().__init__(dictionary=dictionary, max_n_words=max_n_words)
         self.bpe = Bpe(codes=codes)
+        self.bpe_dropout = bpe_dropout
 
-    def tokenize(self, sent: str) -> List[str]:
-        return sum([self.bpe.segment_word(w) for w in sent.strip().split()], [])
+    def tokenize(self, sent: str, is_train=False) -> List[str]:
+        if is_train:
+            bpe_dropout = self.bpe_dropout
+        else:
+            bpe_dropout = 0.0
+        return sum([self.bpe.segment_word(w, bpe_dropout=bpe_dropout) for w in sent.strip().split()], [])
 
     def detokenize(self, tokens: List[str]) -> str:
         return re.sub(r"@@\s|@@$", "", " ".join(tokens))

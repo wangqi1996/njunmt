@@ -1,9 +1,8 @@
 import itertools
+import numpy as np
 import os
 import random
 import time
-
-import numpy as np
 import torch
 import yaml
 from tensorboardX import SummaryWriter
@@ -173,6 +172,8 @@ def inference(valid_iterator,
               rank=0,
               world_size=1,
               using_numbering_iterator=True,
+              sample_K=0,
+              seed=0
               ):
     model.eval()
     trans_in_all_beams = [[] for _ in range(beam_size)]
@@ -206,7 +207,8 @@ def inference(valid_iterator,
         x = prepare_data(seqs_x, seqs_y=None, cuda=Constants.USE_GPU)
 
         with torch.no_grad():
-            word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha)
+            word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha,
+                                   sample_K=sample_K, seed=seed)
 
         word_ids = word_ids.cpu().numpy().tolist()
 
@@ -527,19 +529,23 @@ def train(flags):
         TextLineDataset(data_path=data_configs['train_data'][0],
                         vocabulary=vocab_src,
                         max_len=data_configs['max_len'][0],
+                        is_train_dataset=True
                         ),
         TextLineDataset(data_path=data_configs['train_data'][1],
                         vocabulary=vocab_tgt,
                         max_len=data_configs['max_len'][1],
+                        is_train_dataset=True
                         )
     )
 
     valid_bitext_dataset = ZipDataset(
         TextLineDataset(data_path=data_configs['valid_data'][0],
                         vocabulary=vocab_src,
+                        is_train_dataset=False,
                         ),
         TextLineDataset(data_path=data_configs['valid_data'][1],
                         vocabulary=vocab_tgt,
+                        is_train_dataset=False
                         )
     )
 
@@ -880,6 +886,7 @@ def train(flags):
                     if bad_count >= training_configs['early_stop_patience'] and eidx > 0:
                         is_early_stop = True
                         WARN("Early Stop!")
+                        exit(0)
 
                 if summary_writer is not None:
                     summary_writer.add_scalar("bad_count", bad_count, uidx)
@@ -936,6 +943,7 @@ def translate(flags):
 
     data_configs = configs['data_configs']
     model_configs = configs['model_configs']
+    training_configs = configs['training_configs']
 
     timer = Timer()
     # ================================================================================== #
@@ -949,7 +957,8 @@ def translate(flags):
     vocab_tgt = Vocabulary.build_from_file(**data_configs['vocabularies'][1])
 
     valid_dataset = TextLineDataset(data_path=flags.source_path,
-                                    vocabulary=vocab_src)
+                                    vocabulary=vocab_src,
+                                    is_train_dataset=False)
 
     valid_iterator = DataIterator(dataset=valid_dataset,
                                   batch_size=flags.batch_size,
@@ -986,6 +995,9 @@ def translate(flags):
     INFO('Begin...')
     timer.tic()
 
+    if flags.copy_head is False:
+        flags.sample_K = 0
+
     translations_in_all_beams = inference(
         valid_iterator=valid_iterator,
         model=nmt_model,
@@ -996,7 +1008,9 @@ def translate(flags):
         alpha=flags.alpha,
         rank=rank,
         world_size=world_size,
-        using_numbering_iterator=True
+        using_numbering_iterator=True,
+        sample_K=flags.sample_K,
+        seed=flags.seed
     )
 
     acc_time = timer.toc(return_seconds=True)
@@ -1013,6 +1027,19 @@ def translate(flags):
                 for trans in translations_in_all_beams[ii]:
                     handles[ii].write('%s\n' % trans)
 
+        # compute bleu score
+        if flags.ref_path is not None:
+            bleu_scorer = SacreBLEUScorer(reference_path=flags.ref_path,
+                                          num_refs=flags.num_refs,
+                                          lang_pair=data_configs["lang_pair"],
+                                          sacrebleu_args=training_configs["bleu_valid_configs"]['sacrebleu_args'],
+                                          postprocess=training_configs["bleu_valid_configs"]['postprocess']
+                                          )
+
+            for i in range(keep_n):
+                with open(outputs[i]) as f:
+                    bleu_v = bleu_scorer.corpus_bleu(f)
+                    print(str(i) + " bleu: " + str(bleu_v))
 
 def ensemble_translate(flags):
     Constants.USE_GPU = flags.use_gpu
@@ -1051,7 +1078,8 @@ def ensemble_translate(flags):
     vocab_tgt = Vocabulary.build_from_file(**data_configs['vocabularies'][1])
 
     valid_dataset = TextLineDataset(data_path=flags.source_path,
-                                    vocabulary=vocab_src)
+                                    vocabulary=vocab_src,
+                                    is_train_dataset=False)
 
     valid_iterator = DataIterator(dataset=valid_dataset,
                                   batch_size=flags.batch_size,

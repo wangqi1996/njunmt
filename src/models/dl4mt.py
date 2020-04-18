@@ -25,14 +25,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import src.utils.init as my_init
-from src.modules.tensor_utils import tile_batch
 from src.decoding.utils import tensor_gather_helper
 from src.modules.cgru import CGRUCell
 from src.modules.embeddings import Embeddings
 from src.modules.rnn import RNN
-from .base import NMTModel
-
+from src.modules.tensor_utils import tile_batch
 from src.utils.common_utils import Constants
+from .base import NMTModel
 
 PAD = Constants.PAD
 
@@ -40,6 +39,7 @@ __all__ = [
     'DL4MT',
     'dl4mt_base'
 ]
+
 
 class Encoder(nn.Module):
     def __init__(self,
@@ -279,7 +279,7 @@ class DL4MT(NMTModel):
 
         return {"dec_hiddens": dec_init, "dec_caches": dec_caches, "ctx": ctx, "ctx_mask": ctx_mask}
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, sample_K=0, seed=0):
 
         ctx = dec_states['ctx']
         ctx_mask = dec_states['ctx_mask']

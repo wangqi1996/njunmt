@@ -55,7 +55,7 @@ class NMTModel(nn.Module):
         """
         raise NotImplementedError
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
         """
         Decoding for one step
         Args:

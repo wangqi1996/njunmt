@@ -1,9 +1,12 @@
 import math
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import src.utils.init as my_init
 
+import src.utils.init as my_init
 from .tensor_utils import tile_batch, FLOAT32_INF
 
 
@@ -156,7 +159,7 @@ class MultiHeadedAttention(nn.Module):
         return x.view(-1, self.head_count, seq_len, self.dim_per_head).transpose(1, 2).contiguous() \
             .view(-1, seq_len, self.head_count * self.dim_per_head)
 
-    def forward(self, key, value, query, mask=None, enc_attn_cache=None, self_attn_cache=None):
+    def forward(self, key, value, query, mask=None, enc_attn_cache=None, self_attn_cache=None, sample_K=0, seed=0):
         """
         Compute the context vector and the attention vectors.
 
@@ -213,6 +216,23 @@ class MultiHeadedAttention(nn.Module):
 
         # 3) Apply attention dropout and compute context vectors.
         attn = F.softmax(scores, dim=-1)  # [bsz * n_head, q_len, k_len]
+
+        # sample_K=0相当于不复制,故训练时，设置sample_K=0
+        if sample_K > 0:
+            # random.seed(seed)
+            # [batch_size, head_count]
+            attn = attn.view(batch_size, head_count, query_len, key_len)
+            candidate = attn.argmax(-1)[:, :, 0].cpu().numpy()
+            for batch in range(attn.shape[0]):
+                times = np.zeros(attn.shape[-1])
+                for can in candidate[batch]:
+                    times[can] += 1
+
+                if times.max() <= sample_K:
+                    sample_head = random.randint(0, head_count - 1)
+                    attn[batch] = attn[batch, sample_head, :, :].unsqueeze(0).repeat(head_count, 1, 1)
+            attn = attn.view(batch_size * head_count, query_len, key_len)
+
         drop_attn = self.dropout(attn)
         context = self._combine_heads(torch.bmm(drop_attn, value_up))
 

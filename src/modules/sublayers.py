@@ -96,7 +96,9 @@ class MultiHeadedAttention(nn.Module):
 
         # 3) Apply attention dropout and compute context vectors.
         attn = self.sm(scores)
+
         drop_attn = self.dropout(attn)
+
         context = self._combine_heads(torch.matmul(drop_attn, value_up))
 
         output = self.final_linear(context)
@@ -108,3 +110,16 @@ class MultiHeadedAttention(nn.Module):
             .contiguous()
         # END CHECK
         return output, top_attn, [key_up, value_up]
+
+#
+# if __name__ == '__main__':
+#     print("123")
+#     model_dim, head_count = 10, 2
+#     attention = MultiHeadedAttention(model_dim, head_count)
+#     key_len = 20
+#     query_len = 10
+#     batch = 3
+#     key = torch.randn(batch, key_len, model_dim)
+#     value = torch.randn(batch, key_len, model_dim)
+#     query = torch.randn(batch, query_len, model_dim)
+#     output = attention(key, value, query)

@@ -2,7 +2,7 @@ import argparse
 import os
 
 from src.main import translate
-from . import auto_mkdir
+from src.bin import auto_mkdir
 
 parser = argparse.ArgumentParser()
 
@@ -43,6 +43,20 @@ parser.add_argument("--multi_gpu", action="store_true",
 
 parser.add_argument("--shared_dir", type=str, default=None,
                     help="""Shared directory across nodes. Default is '/tmp'""")
+
+parser.add_argument("--sample_K", type=int, default=3,
+                    help="""sample_K""")
+
+parser.add_argument("--seed", type=int, default=1234,
+                    help="""seed""")
+
+parser.add_argument("--copy_head", action="store_true")
+
+parser.add_argument("--ref_path", type=str,
+                    help="""ref path""")
+
+parser.add_argument("--num_refs", type=int, default=1,
+                    help="""num_refs""")
 
 
 def run(**kwargs):
