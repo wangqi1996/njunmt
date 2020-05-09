@@ -6,29 +6,31 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Build Status](https://travis-ci.com/whr94621/NJUNMT-pytorch.svg?branch=dev-travis-ci)](https://travis-ci.com/whr94621/NJUNMT-pytorch)
 
+## 目录
+- [NJUNMT-pytorch](#njunmt-pytorch)
+  - [English, 中文](#english-%E4%B8%AD%E6%96%87)
+  - [目录](#%E7%9B%AE%E5%BD%95)
+  - [依赖的包](#%E4%BE%9D%E8%B5%96%E7%9A%84%E5%8C%85)
+  - [使用说明](#%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E)
+    - [快速开始](#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
+    - [1. 建立词表](#1-%E5%BB%BA%E7%AB%8B%E8%AF%8D%E8%A1%A8)
+    - [2. 修改配置文件](#2-%E4%BF%AE%E6%94%B9%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6)
+    - [3. 训练](#3-%E8%AE%AD%E7%BB%83)
+    - [4. 解码](#4-%E8%A7%A3%E7%A0%81)
+  - [多卡并行](#%E5%A4%9A%E5%8D%A1%E5%B9%B6%E8%A1%8C)
+  - [Benchmark](#benchmark)
+  - [和我们联系](#%E5%92%8C%E6%88%91%E4%BB%AC%E8%81%94%E7%B3%BB)
+
 NJUNMT-pytorch是一个开源的神经机器翻译工具包。这个工具包主要是为了方便机器翻译的研究，其中包括了如下一些基线系统：
 
 - [DL4MT-tutorial](https://github.com/nyu-dl/dl4mt-tutorial): 一个被广泛用作基于RNN的神经机器翻译模型的基线系统实现。据我们所知，这是目前唯一的和广为使用的的DL4MT系统相一致的pytorch实现。
 
 - [Attention is all you need](https://arxiv.org/abs/1706.03762): 谷歌提出的一个强大的神经机器翻译模型。这个模型完全依赖于注意力机制构建。
 
-## 目录
-- [NJUNMT-pytorch](#njunmt-pytorch)
-    - [目录](#%E7%9B%AE%E5%BD%95)
-    - [依赖的包](#%E4%BE%9D%E8%B5%96%E7%9A%84%E5%8C%85)
-    - [使用说明](#%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E)
-        - [快速开始](#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
-        - [1. 建立词表](#1-%E5%BB%BA%E7%AB%8B%E8%AF%8D%E8%A1%A8)
-        - [2. 修改配置文件](#2-%E4%BF%AE%E6%94%B9%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6)
-        - [3. 训练](#3-%E8%AE%AD%E7%BB%83)
-        - [4. 解码](#4-%E8%A7%A3%E7%A0%81)
-    - [Benchmark](#benchmark)
-    - [和我们联系](#%E5%92%8C%E6%88%91%E4%BB%AC%E8%81%94%E7%B3%BB)
-
 ## 依赖的包
 
 - python 3.5+
-- pytorch 0.4.0+
+- pytorch 1.0
 - tqdm
 - tensorboardX
 - sacrebleu
@@ -126,6 +128,10 @@ python -m src.bin.translate \
 通过运行```python -m src.bin.translate --help```来查看更多的选项。
 
 同样我们的代码支持集成解码。通过运行```python -m src.bin.ensemble_translate --help```来查看更多的选项。
+
+## 多卡并行
+
+请查看[多卡并行.md](./docs/zh/多卡并行.md)
 
 ## Benchmark
 

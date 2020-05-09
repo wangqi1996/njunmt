@@ -1,4 +1,12 @@
 from collections import OrderedDict
+from src.optim import Optimizer
+from src.utils.common_utils import register
+
+SCHEDULERS = {}
+
+
+def register_sheduler(name: str):
+    return register(name, SCHEDULERS)
 
 
 class LearningRateScheduler(object):
@@ -52,6 +60,22 @@ class LearningRateScheduler(object):
                 self._state[name] = state_dict[name]
 
 
+@register_sheduler("linear")
+class LinearScheduler(LearningRateScheduler):
+
+    def __init__(self, optimizer, decay_steps, min_lr):
+        super(LinearScheduler, self).__init__(optimizer=optimizer, min_lr=min_lr)
+        self.decay_steps = decay_steps
+
+    def update_lr(self, old_lr, global_step, **kwargs):
+        origin_lr = self.optimizer.init_lr
+
+        new_lr = max(0, (origin_lr - self.min_lr) * (self.decay_steps - global_step) / self.decay_steps) + self.min_lr
+
+        return new_lr
+
+
+@register_sheduler("noam")
 class NoamScheduler(LearningRateScheduler):
 
     def __init__(self, optimizer, d_model, warmup_steps, min_lr=-1.0):
@@ -59,6 +83,8 @@ class NoamScheduler(LearningRateScheduler):
 
         self.d_model = d_model
         self.warmup_steps = warmup_steps
+        # Update learning at first step
+        self.step(global_step=1)
 
     def update_lr(self, old_lr, global_step, **kwargs):
         opt_corr = 0.002
@@ -71,6 +97,7 @@ class NoamScheduler(LearningRateScheduler):
         return new_lr
 
 
+@register_sheduler("loss")
 class ReduceOnPlateauScheduler(LearningRateScheduler):
 
     def __init__(self, optimizer, patience, min_lr=-1.0, scale=0.5, mode="min"):
@@ -118,3 +145,54 @@ class ReduceOnPlateauScheduler(LearningRateScheduler):
                 new_lr = old_lr * self.scale
                 self._state["bad_count"] = 0
                 return new_lr
+
+
+@register_sheduler("isqrt")
+class InverseSqrtWithWarmupScheduler(LearningRateScheduler):
+    """
+    0~warmup_steps: linear increase. If warmup_steps is None, hold initial learning rate.
+    warmup_steps~decay_steps: hold current learning rate.
+    decay_steps~ : learning rate decay as an inverse sqrt function.
+    """
+
+    def __init__(self, optimizer, warmup_steps=None, decay_steps=None, min_lr=-1.0, init_lr=1e-7):
+
+        super(InverseSqrtWithWarmupScheduler, self).__init__(optimizer=optimizer, min_lr=min_lr)
+
+        if warmup_steps is None:
+            warmup_steps = 1
+        if decay_steps is None:
+            decay_steps = float('inf')
+
+        self.warmup_steps = warmup_steps
+        self.decay_steps = decay_steps
+
+        self.init_lr = init_lr
+
+        if self.warmup_steps > 1:
+            self._bias = (self.init_lr * self.warmup_steps - self.max_lr) / (self.warmup_steps - 1)
+        else:
+            self._bias = 0.0
+
+        self.step(global_step=1)
+
+    @property
+    def max_lr(self):
+        return self.optimizer.init_lr
+
+    def update_lr(self, old_lr, global_step, **kwargs):
+        if global_step <= self.warmup_steps:
+            return global_step * (self.max_lr - self._bias) / self.warmup_steps + self._bias
+        elif self.warmup_steps < global_step <= self.decay_steps:
+            return self.max_lr
+        else:
+            return self.max_lr * ((self.decay_steps / global_step) ** 0.5)
+
+
+def build_scheduler(schedule_method: str, optimizer: Optimizer, scheduler_configs: dict):
+    if schedule_method is None:
+        return None
+    elif schedule_method not in SCHEDULERS:
+        raise KeyError("Unknown scheduler name {0}. Do not use lr_scheduling.".format(schedule_method))
+    else:
+        return SCHEDULERS[schedule_method](optimizer=optimizer, **scheduler_configs)

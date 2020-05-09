@@ -55,7 +55,7 @@ class NMTModel(nn.Module):
         """
         raise NotImplementedError
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
         """
         Decoding for one step
         Args:
@@ -69,7 +69,7 @@ class NMTModel(nn.Module):
 
         raise NotImplementedError
 
-    def reorder_dec_states(self, dec_states, new_beam_indices, beam_size):
+    def reorder_dec_states(self, dec_states, new_beam_indices, batch_size, beam_size):
         """
         Re-ordering decoding states according to newly selected beam indices
 

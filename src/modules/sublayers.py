@@ -1,32 +1,7 @@
 import math
+
 import torch
 import torch.nn as nn
-
-
-class PositionwiseFeedForward(nn.Module):
-    """ A two-layer Feed-Forward-Network with residual layer norm.
-
-        Args:
-            size (int): the size of input for the first-layer of the FFN.
-            hidden_size (int): the hidden layer size of the second-layer
-                              of the FNN.
-            dropout (float): dropout probability(0-1.0).
-    """
-
-    def __init__(self, size, hidden_size, dropout=0.1):
-        super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(size, hidden_size)
-        self.w_2 = nn.Linear(hidden_size, size)
-        self.layer_norm = nn.LayerNorm(size)
-        # Save a little memory, by doing inplace.
-        self.dropout_1 = nn.Dropout(dropout, inplace=False)
-        self.relu = nn.ReLU(inplace=False)
-        self.dropout_2 = nn.Dropout(dropout)
-
-    def forward(self, x):
-        inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
-        output = self.dropout_2(self.w_2(inter))
-        return output + x
 
 
 class MultiHeadedAttention(nn.Module):
@@ -121,7 +96,9 @@ class MultiHeadedAttention(nn.Module):
 
         # 3) Apply attention dropout and compute context vectors.
         attn = self.sm(scores)
+
         drop_attn = self.dropout(attn)
+
         context = self._combine_heads(torch.matmul(drop_attn, value_up))
 
         output = self.final_linear(context)
@@ -133,3 +110,16 @@ class MultiHeadedAttention(nn.Module):
             .contiguous()
         # END CHECK
         return output, top_attn, [key_up, value_up]
+
+#
+# if __name__ == '__main__':
+#     print("123")
+#     model_dim, head_count = 10, 2
+#     attention = MultiHeadedAttention(model_dim, head_count)
+#     key_len = 20
+#     query_len = 10
+#     batch = 3
+#     key = torch.randn(batch, key_len, model_dim)
+#     value = torch.randn(batch, key_len, model_dim)
+#     query = torch.randn(batch, query_len, model_dim)
+#     output = attention(key, value, query)

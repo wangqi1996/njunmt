@@ -25,12 +25,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import src.utils.init as my_init
-from src.data.vocabulary import PAD
-from src.decoding.utils import tile_batch, tensor_gather_helper
+from src.decoding.utils import tensor_gather_helper
 from src.modules.cgru import CGRUCell
 from src.modules.embeddings import Embeddings
 from src.modules.rnn import RNN
+from src.modules.tensor_utils import tile_batch
+from src.utils.common_utils import Constants
 from .base import NMTModel
+
+PAD = Constants.PAD
+
+__all__ = [
+    'DL4MT',
+    'dl4mt_base'
+]
 
 
 class Encoder(nn.Module):
@@ -43,9 +51,8 @@ class Encoder(nn.Module):
 
         # Use PAD
         self.embeddings = Embeddings(num_embeddings=n_words,
-                                    embedding_dim=input_size,
-                                    dropout=0.0,
-                                    add_position_embedding=False)
+                                     embedding_dim=input_size,
+                                     dropout=0.0)
 
         self.gru = RNN(type="gru", batch_first=True, input_size=input_size, hidden_size=hidden_size,
                        bidirectional=True)
@@ -82,9 +89,8 @@ class Decoder(nn.Module):
         # self.context_size = hidden_size * 2
 
         self.embeddings = Embeddings(num_embeddings=n_words,
-                                    embedding_dim=input_size,
-                                    dropout=0.0,
-                                    add_position_embedding=False)
+                                     embedding_dim=input_size,
+                                     dropout=0.0)
 
         self.cgru_cell = CGRUCell(input_size=input_size, hidden_size=hidden_size, context_size=context_size)
 
@@ -121,7 +127,7 @@ class Decoder(nn.Module):
 
             no_pad_mask = 1.0 - mask.float()
             ctx_mean = (context * no_pad_mask.unsqueeze(2)).sum(1) / no_pad_mask.unsqueeze(2).sum(1)
-            dec_init = F.tanh(self.linear_bridge(ctx_mean))
+            dec_init = torch.tanh(self.linear_bridge(ctx_mean))
 
         elif self.bridge_type == "zero":
             batch_size = context.size(0)
@@ -154,7 +160,7 @@ class Decoder(nn.Module):
 
         logits = self.linear_input(emb) + self.linear_hidden(out) + self.linear_ctx(attn)
 
-        logits = F.tanh(logits)
+        logits = torch.tanh(logits)
 
         logits = self.dropout(logits)  # [batch_size, seq_len, dim]
 
@@ -196,7 +202,6 @@ class Generator(nn.Module):
 
             return x_2d.view(x_size)
 
-
     def forward(self, input, log_probs=True):
         """
         input == > Linear == > LogSoftmax
@@ -214,18 +219,23 @@ class Generator(nn.Module):
 
 class DL4MT(NMTModel):
 
-    def __init__(self, n_src_vocab, n_tgt_vocab, d_word_vec=512, d_model=512, dropout=0.5,
-                 proj_share_weight=False, bridge_type="mlp", **kwargs):
+    def __init__(self, n_src_vocab, n_tgt_vocab, d_word_vec, d_model, dropout,
+                 tie_input_output_embedding=True, bridge_type="mlp", tie_source_target_embedding=False, **kwargs):
 
         super().__init__()
 
         self.encoder = Encoder(n_words=n_src_vocab, input_size=d_word_vec, hidden_size=d_model)
 
         self.decoder = Decoder(n_words=n_tgt_vocab, input_size=d_word_vec,
-                               hidden_size=d_model, context_size=d_model*2,
+                               hidden_size=d_model, context_size=d_model * 2,
                                dropout_rate=dropout, bridge_type=bridge_type)
 
-        if proj_share_weight is False:
+        if tie_source_target_embedding:
+            assert n_src_vocab == n_tgt_vocab, \
+                "source and target vocabulary should have equal size when tying source&target embedding"
+            self.encoder.embeddings.embeddings.weight = self.decoder.embeddings.embeddings.weight
+
+        if tie_input_output_embedding is False:
             generator = Generator(n_words=n_tgt_vocab, hidden_size=d_word_vec, padding_idx=PAD)
         else:
             generator = Generator(n_words=n_tgt_vocab, hidden_size=d_word_vec, padding_idx=PAD,
@@ -269,7 +279,7 @@ class DL4MT(NMTModel):
 
         return {"dec_hiddens": dec_init, "dec_caches": dec_caches, "ctx": ctx, "ctx_mask": ctx_mask}
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, sample_K=0, seed=0):
 
         ctx = dec_states['ctx']
         ctx_mask = dec_states['ctx_mask']
@@ -288,11 +298,9 @@ class DL4MT(NMTModel):
 
         return scores, dec_states
 
-    def reorder_dec_states(self, dec_states, new_beam_indices, beam_size):
+    def reorder_dec_states(self, dec_states, new_beam_indices, batch_size, beam_size):
 
         dec_hiddens = dec_states["dec_hiddens"]
-
-        batch_size = dec_hiddens.size(0) // beam_size
 
         dec_hiddens = tensor_gather_helper(gather_indices=new_beam_indices,
                                            gather_from=dec_hiddens,
@@ -303,3 +311,31 @@ class DL4MT(NMTModel):
         dec_states['dec_hiddens'] = dec_hiddens
 
         return dec_states
+
+
+def dl4mt_base(configs):
+    """ Configuration of DL4MT
+
+    This is a common configuration of dl4mt-tutorial session 2.
+    """
+    # model configurations
+    model_configs = configs.setdefault("model_configs", {})
+    model_configs['model'] = "DL4MT"
+    model_configs['d_model'] = 512
+    model_configs['d_word_vec'] = 1024
+    model_configs['dropout'] = 0.5
+    model_configs['tie_input_output_embedding'] = True
+    model_configs['bridge_type'] = "mlp"
+
+    # optimizer_configs
+    optimizer_configs = configs.setdefault("optimizer_configs", {})
+    optimizer_configs['optimizer'] = "adam"
+    optimizer_configs['learning_rate'] = 0.0004
+    optimizer_configs['grad_clip'] = 1.0
+    optimizer_configs['schedule_method'] = "loss"
+    optimizer_configs['scheduler_configs'] = {
+        "min_lr": 0.00005,
+        "patience": 5
+    }
+
+    return configs

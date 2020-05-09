@@ -25,13 +25,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.data.vocabulary import PAD
-from src.decoding.utils import tile_batch, tensor_gather_helper
+from src.decoding.utils import tensor_gather_helper
 from src.models.base import NMTModel
+from src.modules.activation import build_activation
+from src.modules.attention import MultiHeadedAttention
 from src.modules.basic import BottleLinear as Linear
 from src.modules.embeddings import Embeddings
-from src.modules.sublayers import PositionwiseFeedForward, MultiHeadedAttention
+from src.modules.tensor_utils import tile_batch
 from src.utils import nest
+from src.utils.common_utils import Constants
+
+PAD = Constants.PAD
+
+__all__ = [
+    'Transformer',
+    'transformer_base_v1',
+    'transformer_base_v2',
+    'transformer_low_resource'
+]
 
 
 def get_attn_causal_mask(seq):
@@ -49,44 +60,157 @@ def get_attn_causal_mask(seq):
     return subsequent_mask
 
 
-class EncoderBlock(nn.Module):
+class PositionwiseFeedForward(nn.Module):
+    """
+    A two-layer Feed-Forward-Network with residual layer norm.
 
-    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1):
-        super(EncoderBlock, self).__init__()
+    Args:
+        size (int): the size of input for the first-layer of the FFN.
+        hidden_size (int): the hidden layer size of the second-layer
+                          of the FNN.
+        dropout (float): dropout probability(0-1.0).
+    """
 
-        self.layer_norm = nn.LayerNorm(d_model)
+    def __init__(self, size, hidden_size, dropout=0.1, activation="relu"):
+        super(PositionwiseFeedForward, self).__init__()
+        self.w_1 = nn.Linear(size, hidden_size)
+        self.w_2 = nn.Linear(hidden_size, size)
+        # Save a little memory, by doing inplace.
+        self.dropout = nn.Dropout(dropout)
+        self.activation = build_activation(activation)
 
-        self.slf_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
-                                             dim_per_head=dim_per_head)
+    def forward(self, x):
+        return self.w_2(self.dropout(self.activation(self.w_1(x))))
 
-        self.pos_ffn = PositionwiseFeedForward(size=d_model, hidden_size=d_inner_hid, dropout=dropout)
+
+class Block(nn.Module):
+    """
+    The definition of block (sublayer) is formally introduced in Chen, Mia Xu et al.
+    “The Best of Both Worlds: Combining Recent Advances in Neural Machine Translation.” ACL (2018).
+
+    A block is consist of a transform function (TF), a layer normalization (LN) and a residual connection with
+    dropout (Drop-Res). There are two kinds of block, differing in the position of layer normalization:
+        a): LN -> TF -> Drop-Res  (layer_norm_first is True)
+        b): TF -> Drop-Res -> LN
+
+    A block can return more than one output, but we only perform LN and Drop-Res on the first output.
+    """
+
+    def __init__(self, size, dropout, layer_norm_first=True):
+        super().__init__()
+
+        self.layer_norm_first = layer_norm_first
+
+        self.layer_norm = nn.LayerNorm(size)
+        self.dropout = nn.Dropout(dropout)
+
+    def _transform(self, *args, **kwargs):
+
+        raise NotImplementedError
+
+    def forward(self, x, *args, **kwargs):
+
+        # 1. layer normalization
+        if self.layer_norm_first:
+            transform_input = self.layer_norm(x)
+        else:
+            transform_input = x
+
+        # 2. transformation
+        output = self._transform(transform_input, *args, **kwargs)
+
+        # 3. dropout & residual add
+        if not isinstance(output, tuple):
+            output = x + self.dropout(output)
+            if not self.layer_norm_first:
+                output = self.layer_norm(output)
+        else:
+            output = (x + self.dropout(output[0]),) + output[1:]
+            if not self.layer_norm_first:
+                output = (self.layer_norm(output[0]),) + output[1:]
+
+        return output
+
+
+class SelfAttentionBlock(Block):
+
+    def __init__(self, model_dim, head_count, dim_per_head=None, dropout=0.1, attn_dropout=0.1, layer_norm_firs=True):
+        super().__init__(model_dim, dropout=dropout, layer_norm_first=layer_norm_firs)
+
+        self.transform_layer = MultiHeadedAttention(model_dim=model_dim, head_count=head_count,
+                                                    dim_per_head=dim_per_head, dropout=attn_dropout)
+
+    def _transform(self, x, mask=None, self_attn_cache=None):
+        return self.transform_layer(x, x, x, mask=mask, self_attn_cache=self_attn_cache)
+
+
+class EncoderAttentionBlock(Block):
+
+    def __init__(self, model_dim, head_count, dim_per_head=None, dropout=0.1, attn_dropout=0.1, layer_norm_first=True):
+        super().__init__(model_dim, dropout=dropout, layer_norm_first=layer_norm_first)
+
+        self.transform_layer = MultiHeadedAttention(model_dim=model_dim, head_count=head_count,
+                                                    dim_per_head=dim_per_head, dropout=attn_dropout)
+
+    def _transform(self, dec_hidden, context, mask=None, enc_attn_cache=None, sample_K=0, seed=0):
+        return self.transform_layer(context, context, dec_hidden, mask=mask, enc_attn_cache=enc_attn_cache,
+                                    sample_K=sample_K,
+                                    seed=seed)
+
+
+class PositionwiseFeedForwardBlock(Block):
+
+    def __init__(self, size, hidden_size, dropout=0.1, layer_norm_first=True, activation="relu"):
+        super().__init__(size=size, dropout=dropout, layer_norm_first=layer_norm_first)
+
+        self.transform_layer = PositionwiseFeedForward(size=size, hidden_size=hidden_size, dropout=dropout,
+                                                       activation=activation)
+
+    def _transform(self, x):
+        return self.transform_layer(x)
+
+
+class EncoderLayer(nn.Module):
+
+    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, layer_norm_first=True,
+                 ffn_activation="relu"):
+        super(EncoderLayer, self).__init__()
+
+        self.slf_attn = SelfAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
+                                           dim_per_head=dim_per_head, layer_norm_firs=layer_norm_first)
+
+        self.pos_ffn = PositionwiseFeedForwardBlock(size=d_model, hidden_size=d_inner_hid, dropout=dropout,
+                                                    layer_norm_first=layer_norm_first, activation=ffn_activation)
 
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, enc_input, slf_attn_mask=None):
-        input_norm = self.layer_norm(enc_input)
-        context, _, _ = self.slf_attn(input_norm, input_norm, input_norm, slf_attn_mask)
-        out = self.dropout(context) + enc_input
+        context, _, _ = self.slf_attn(enc_input, mask=slf_attn_mask)
 
-        return self.pos_ffn(out)
+        return self.pos_ffn(context)
 
 
 class Encoder(nn.Module):
 
     def __init__(
             self, n_src_vocab, n_layers=6, n_head=8,
-            d_word_vec=512, d_model=512, d_inner_hid=1024, dropout=0.1, dim_per_head=None):
+            d_word_vec=512, d_model=512, d_inner_hid=1024, dropout=0.1, dim_per_head=None,
+            padding_idx=PAD, positional_embedding="sin", layer_norm_first=True, ffn_activation="relu"):
         super().__init__()
 
+        self.scale = d_word_vec ** 0.5
         self.num_layers = n_layers
+        self.layer_norm_first = layer_norm_first
+
         self.embeddings = Embeddings(num_embeddings=n_src_vocab,
                                      embedding_dim=d_word_vec,
                                      dropout=dropout,
-                                     add_position_embedding=True
+                                     positional_embedding=positional_embedding
                                      )
-        self.block_stack = nn.ModuleList(
-            [EncoderBlock(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
-                          dim_per_head=dim_per_head)
+
+        self.layer_stack = nn.ModuleList(
+            [EncoderLayer(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
+                          dim_per_head=dim_per_head, layer_norm_first=layer_norm_first, ffn_activation=ffn_activation)
              for _ in range(n_layers)])
 
         self.layer_norm = nn.LayerNorm(d_model)
@@ -100,58 +224,53 @@ class Encoder(nn.Module):
         enc_mask = src_seq.detach().eq(PAD)
         enc_slf_attn_mask = enc_mask.unsqueeze(1).expand(batch_size, src_len, src_len)
 
+        if not self.layer_norm_first:
+            emb = self.layer_norm(emb)
+
         out = emb
 
         for i in range(self.num_layers):
-            out = self.block_stack[i](out, enc_slf_attn_mask)
+            out = self.layer_stack[i](out, enc_slf_attn_mask)
 
-        out = self.layer_norm(out)
+        if self.layer_norm_first:
+            out = self.layer_norm(out)
 
         return out, enc_mask
 
 
-class DecoderBlock(nn.Module):
+class DecoderLayer(nn.Module):
     ''' Compose with three layers '''
 
-    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1):
-        super(DecoderBlock, self).__init__()
+    def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, layer_norm_first=True,
+                 ffn_activation="relu"):
+        super(DecoderLayer, self).__init__()
 
-        self.slf_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
-                                             dim_per_head=dim_per_head)
-        self.ctx_attn = MultiHeadedAttention(head_count=n_head, model_dim=d_model, dropout=dropout,
-                                             dim_per_head=dim_per_head)
-        self.pos_ffn = PositionwiseFeedForward(size=d_model, hidden_size=d_inner_hid)
+        self.slf_attn = SelfAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
+                                           dim_per_head=dim_per_head, layer_norm_firs=layer_norm_first)
+        self.ctx_attn = EncoderAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
+                                              dim_per_head=dim_per_head, layer_norm_first=layer_norm_first)
 
-        self.layer_norm_1 = nn.LayerNorm(d_model)
-        self.layer_norm_2 = nn.LayerNorm(d_model)
+        self.pos_ffn = PositionwiseFeedForwardBlock(size=d_model, hidden_size=d_inner_hid,
+                                                    layer_norm_first=layer_norm_first, activation=ffn_activation)
 
         self.dropout = nn.Dropout(dropout)
 
-    def compute_cache(self, enc_output):
-        return self.ctx_attn.compute_cache(enc_output, enc_output)
-
     def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None,
-                enc_attn_cache=None, self_attn_cache=None):
+                enc_attn_cache=None, self_attn_cache=None, sample_K=0, seed=0):
         # Args Checks
         input_batch, input_len, _ = dec_input.size()
 
         contxt_batch, contxt_len, _ = enc_output.size()
 
-        input_norm = self.layer_norm_1(dec_input)
-        all_input = input_norm
+        query, _, self_attn_cache = self.slf_attn(dec_input, mask=slf_attn_mask, self_attn_cache=self_attn_cache)
 
-        query, _, self_attn_cache = self.slf_attn(all_input, all_input, input_norm,
-                                                  mask=slf_attn_mask, self_attn_cache=self_attn_cache)
+        attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
+                                                                  enc_attn_cache=enc_attn_cache, sample_K=sample_K,
+                                                                  seed=seed)
 
-        query = self.dropout(query) + dec_input
+        output = self.pos_ffn(attn_values)
 
-        query_norm = self.layer_norm_2(query)
-        mid, attn, enc_attn_cache = self.ctx_attn(enc_output, enc_output, query_norm,
-                                                  mask=dec_enc_attn_mask, enc_attn_cache=enc_attn_cache)
-
-        output = self.pos_ffn(self.dropout(mid) + query)
-
-        return output, attn, self_attn_cache, enc_attn_cache
+        return output, attn_weights, self_attn_cache, enc_attn_cache
 
 
 class Decoder(nn.Module):
@@ -159,23 +278,28 @@ class Decoder(nn.Module):
 
     def __init__(
             self, n_tgt_vocab, n_layers=6, n_head=8,
-            d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None, dropout=0.1):
+            d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None, dropout=0.1,
+            positional_embedding="sin", layer_norm_first=True, padding_idx=PAD, ffn_activation="relu"):
 
         super(Decoder, self).__init__()
 
         self.n_head = n_head
         self.num_layers = n_layers
         self.d_model = d_model
+        self.layer_norm_first = layer_norm_first
 
         self.embeddings = Embeddings(n_tgt_vocab, d_word_vec,
-                                     dropout=dropout, add_position_embedding=True)
+                                     dropout=dropout,
+                                     positional_embedding=positional_embedding,
+                                     padding_idx=padding_idx
+                                     )
 
-        self.block_stack = nn.ModuleList([
-            DecoderBlock(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
-                         dim_per_head=dim_per_head)
+        self.layer_stack = nn.ModuleList([
+            DecoderLayer(d_model=d_model, d_inner_hid=d_inner_hid, n_head=n_head, dropout=dropout,
+                         dim_per_head=dim_per_head, layer_norm_first=layer_norm_first, ffn_activation=ffn_activation)
             for _ in range(n_layers)])
 
-        self.out_layer_norm = nn.LayerNorm(d_model)
+        self.layer_norm = nn.LayerNorm(d_model)
 
         self._dim_per_head = dim_per_head
 
@@ -186,7 +310,8 @@ class Decoder(nn.Module):
         else:
             return self._dim_per_head
 
-    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None):
+    def forward(self, tgt_seq, enc_output, enc_mask, enc_attn_caches=None, self_attn_caches=None, sample_K=0,
+                seed=0):
 
         batch_size, tgt_len = tgt_seq.size()
 
@@ -197,6 +322,9 @@ class Decoder(nn.Module):
 
         # Run the forward pass of the TransformerDecoder.
         emb = self.embeddings(tgt_seq)
+
+        if not self.layer_norm_first:
+            emb = self.layer_norm(emb)
 
         if self_attn_caches is not None:
             emb = emb[:, -1:].contiguous()
@@ -213,32 +341,40 @@ class Decoder(nn.Module):
         new_self_attn_caches = []
         new_enc_attn_caches = []
         for i in range(self.num_layers):
+            # copy head occur when last layer
+            if i == self.num_layers - 1:
+                layer_sample_K = sample_K
+            else:
+                layer_sample_K = 0
+
             output, attn, self_attn_cache, enc_attn_cache \
-                = self.block_stack[i](output,
+                = self.layer_stack[i](output,
                                       enc_output,
                                       dec_slf_attn_mask,
                                       dec_enc_attn_mask,
                                       enc_attn_cache=enc_attn_caches[i] if enc_attn_caches is not None else None,
-                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None)
+                                      self_attn_cache=self_attn_caches[i] if self_attn_caches is not None else None,
+                                      sample_K=layer_sample_K, seed=seed)
 
             new_self_attn_caches += [self_attn_cache]
             new_enc_attn_caches += [enc_attn_cache]
 
-        output = self.out_layer_norm(output)
+        if self.layer_norm_first:
+            output = self.layer_norm(output)
 
         return output, new_self_attn_caches, new_enc_attn_caches
 
 
 class Generator(nn.Module):
 
-    def __init__(self, n_words, hidden_size, shared_weight=None, padding_idx=-1):
+    def __init__(self, n_words, hidden_size, shared_weight=None, padding_idx=-1, add_bias=False):
         super(Generator, self).__init__()
 
         self.n_words = n_words
         self.hidden_size = hidden_size
         self.padding_idx = padding_idx
 
-        self.proj = Linear(self.hidden_size, self.n_words, bias=False)
+        self.proj = Linear(self.hidden_size, self.n_words, bias=add_bias)
 
         if shared_weight is not None:
             self.proj.linear.weight = shared_weight
@@ -278,19 +414,24 @@ class Transformer(NMTModel):
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_layers=6, n_head=8,
             d_word_vec=512, d_model=512, d_inner_hid=1024, dim_per_head=None,
-            dropout=0.1, proj_share_weight=True, **kwargs):
+            dropout=0.1, tie_input_output_embedding=True, tie_source_target_embedding=False, padding_idx=PAD,
+            layer_norm_first=True, positional_embedding="sin", generator_bias=False, ffn_activation="relu", **kwargs):
 
         super(Transformer, self).__init__()
 
         self.encoder = Encoder(
             n_src_vocab, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
-            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head)
+            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head,
+            padding_idx=padding_idx, layer_norm_first=layer_norm_first, positional_embedding=positional_embedding,
+            ffn_activation=ffn_activation)
 
         self.decoder = Decoder(
             n_tgt_vocab, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
-            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head)
+            d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head,
+            padding_idx=padding_idx, layer_norm_first=layer_norm_first, positional_embedding=positional_embedding,
+            ffn_activation=ffn_activation)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -298,14 +439,20 @@ class Transformer(NMTModel):
             'To facilitate the residual connections, \
              the dimensions of all module output shall be the same.'
 
-        if proj_share_weight:
+        if tie_source_target_embedding:
+            assert n_src_vocab == n_tgt_vocab, \
+                "source and target vocabulary should have equal size when tying source&target embedding"
+            self.encoder.embeddings.embeddings.weight = self.decoder.embeddings.embeddings.weight
+
+        if tie_input_output_embedding:
             self.generator = Generator(n_words=n_tgt_vocab,
                                        hidden_size=d_word_vec,
                                        shared_weight=self.decoder.embeddings.embeddings.weight,
-                                       padding_idx=PAD)
+                                       padding_idx=PAD, add_bias=generator_bias)
 
         else:
-            self.generator = Generator(n_words=n_tgt_vocab, hidden_size=d_word_vec, padding_idx=PAD)
+            self.generator = Generator(n_words=n_tgt_vocab, hidden_size=d_word_vec, padding_idx=PAD,
+                                       add_bias=generator_bias)
 
     def forward(self, src_seq, tgt_seq, log_probs=True):
 
@@ -337,7 +484,7 @@ class Transformer(NMTModel):
             "slf_attn_caches": None
         }
 
-    def decode(self, tgt_seq, dec_states, log_probs=True):
+    def decode(self, tgt_seq, dec_states, log_probs=True, sample_K=0, seed=0):
 
         ctx = dec_states["ctx"]
         ctx_mask = dec_states['ctx_mask']
@@ -346,7 +493,8 @@ class Transformer(NMTModel):
 
         dec_output, slf_attn_caches, enc_attn_caches = self.decoder(tgt_seq=tgt_seq, enc_output=ctx, enc_mask=ctx_mask,
                                                                     enc_attn_caches=enc_attn_caches,
-                                                                    self_attn_caches=slf_attn_caches)
+                                                                    self_attn_caches=slf_attn_caches, sample_K=sample_K,
+                                                                    seed=seed)
 
         next_scores = self.generator(dec_output[:, -1].contiguous(), log_probs=log_probs)
 
@@ -355,11 +503,9 @@ class Transformer(NMTModel):
 
         return next_scores, dec_states
 
-    def reorder_dec_states(self, dec_states, new_beam_indices, beam_size):
+    def reorder_dec_states(self, dec_states, new_beam_indices, batch_size, beam_size):
 
         slf_attn_caches = dec_states['slf_attn_caches']
-
-        batch_size = slf_attn_caches[0][0].size(0) // beam_size
 
         n_head = self.decoder.n_head
         dim_per_head = self.decoder.dim_per_head
@@ -375,3 +521,79 @@ class Transformer(NMTModel):
         dec_states['slf_attn_caches'] = slf_attn_caches
 
         return dec_states
+
+
+def transformer_base_v1(configs):
+    """ Configuration of transformer_base_v1
+
+    This is equivalent to `transformer_base_v1` in tensor2tensor
+    """
+    # model configurations
+    model_configs = configs.setdefault("model_configs", {})
+    model_configs['model'] = "Transformer"
+    model_configs['n_layers'] = 6
+    model_configs['n_head'] = 8
+    model_configs['d_model'] = 512
+    model_configs['d_word_vec'] = 512
+    model_configs['d_inner_hid'] = 2048
+    model_configs['dropout'] = 0.1
+    model_configs['label_smoothing'] = 0.1
+    model_configs["layer_norm_first"] = False
+    model_configs['tie_input_output_embedding'] = True
+
+    # optimizer_configs
+    optimizer_configs = configs.setdefault("optimizer_configs", {})
+    optimizer_configs['optimizer'] = "adam"
+    optimizer_configs['learning_rate'] = 0.1
+    optimizer_configs['grad_clip'] = - 1.0
+    optimizer_configs['optimizer_params'] = {"betas": [0.9, 0.98], "eps": 1e-9}
+    optimizer_configs['schedule_method'] = "noam"
+    optimizer_configs['scheduler_configs'] = {"d_model": 512, "warmup_steps": 4000}
+
+    return configs
+
+
+def transformer_base_v2(configs):
+    """ Configuration of transformer_base_v2
+
+    This is equivalent to `transformer_base_v2` in tensor2tensor
+    """
+    configs = transformer_base_v1(configs)
+
+    # model configurations
+    model_configs = configs['model_configs']
+    model_configs['layer_norm_first'] = True
+
+    # optimizer_configs
+    optimizer_configs = configs['optimizer_configs']
+    optimizer_configs['learning_rate'] = 0.2
+    optimizer_configs['scheduler_configs'] = {"d_model": 512, "warmup_steps": 8000}
+
+    return configs
+
+
+def transformer_low_resource(configs):
+    """ Configuration for training transformer on low-resource datasets.
+
+    This is equivalent to configuration of IWSLT'14 De2en in fairseq.
+    """
+
+    configs = transformer_base_v2(configs)
+
+    # model configurations
+    model_configs = configs['model_configs']
+    model_configs['dropout'] = 0.3
+
+    # optimizer_configs
+    optimizer_configs = configs['optimizer_configs']
+    optimizer_configs['optimizer'] = "adamw"
+    optimizer_configs['learning_rate'] = 0.0005
+    optimizer_configs['optimizer_params'] = {"betas": [0.9, 0.98], "eps": 1e-9, "weight_decay": 0.0001}
+    optimizer_configs['schedule_method'] = "isqrt"
+    optimizer_configs['scheduler_configs'] = {
+        "min_lr": 1e-9,
+        "warmup_steps": 4000,
+        "decay_steps": 4000,
+    }
+
+    return configs

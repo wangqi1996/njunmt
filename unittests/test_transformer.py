@@ -24,13 +24,13 @@ def test_transformer_train(test_dir, use_gpu=False):
 
 def test_transformer_inference(test_dir, use_gpu=False):
     from src.bin import translate
-    from src.utils.common_utils import GlobalNames
+    from src.utils.common_utils import Constants
     config_path = "./unittests/configs/test_transformer.yaml"
 
     saveto = os.path.join(test_dir, "save")
     model_name = test_utils.get_model_name(config_path)
-    model_path = os.path.join(saveto, model_name + GlobalNames.MY_BEST_MODEL_SUFFIX + ".final")
-    source_path = "./unittests/data/dev/zh.0"
+    model_path = os.path.join(saveto, model_name + Constants.MY_BEST_MODEL_SUFFIX + ".final")
+    source_path = "./unittests/data/dev.de"
     batch_size = 3
     beam_size = 3
     alpha = 0.6
@@ -49,13 +49,13 @@ def test_transformer_inference(test_dir, use_gpu=False):
 
 def test_transformer_greedy_search(test_dir, use_gpu=False):
     from src.bin import translate
-    from src.utils.common_utils import GlobalNames
+    from src.utils.common_utils import Constants
     config_path = "./unittests/configs/test_transformer.yaml"
 
     saveto = os.path.join(test_dir, "save")
     model_name = test_utils.get_model_name(config_path)
-    model_path = os.path.join(saveto, model_name + GlobalNames.MY_BEST_MODEL_SUFFIX + ".final")
-    source_path = "./unittests/data/dev/zh.0"
+    model_path = os.path.join(saveto, model_name + Constants.MY_BEST_MODEL_SUFFIX + ".final")
+    source_path = "./unittests/data/dev.de"
     batch_size = 3
     beam_size = 1
     alpha = 0.6
@@ -74,16 +74,16 @@ def test_transformer_greedy_search(test_dir, use_gpu=False):
 
 def test_transformer_ensemble_inference(test_dir, use_gpu=False):
     from src.bin import ensemble_translate
-    from src.utils.common_utils import GlobalNames
+    from src.utils.common_utils import Constants
     config_path = "./unittests/configs/test_transformer.yaml"
 
     saveto = os.path.join(test_dir, "save")
     model_name = test_utils.get_model_name(config_path)
 
-    model_path = os.path.join(saveto, model_name + GlobalNames.MY_BEST_MODEL_SUFFIX + ".final")
+    model_path = os.path.join(saveto, model_name + Constants.MY_BEST_MODEL_SUFFIX + ".final")
     model_path = [model_path for _ in range(3)]
 
-    source_path = "./unittests/data/dev/zh.0"
+    source_path = "./unittests/data/dev.de"
     batch_size = 3
     beam_size = 3
     alpha = 0.6
@@ -105,6 +105,8 @@ if __name__ == '__main__':
 
     parser = test_utils.build_test_argparser()
     args = parser.parse_args()
+
+    test_utils.rm_tmp_dir(test_dir)
 
     if not os.path.exists(test_dir):
         os.makedirs(test_dir, exist_ok=True)
@@ -138,5 +140,3 @@ if __name__ == '__main__':
     test_transformer_ensemble_inference(test_dir, use_gpu=args.use_gpu)
     INFO("Done.")
     INFO("=" * 20)
-
-    test_utils.rm_tmp_dir(test_dir)

@@ -20,8 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import torch
 from collections import OrderedDict
+
+import torch
+
 
 class MovingAverage(object):
     """
@@ -93,3 +95,36 @@ class MovingAverage(object):
         for name, param in state_dict['ma_params'].items():
             if name in self.named_params_ave:
                 self.named_params_ave[name].copy_(param.data)
+
+
+class TwoPhaseExponentialMovingAverage(MovingAverage):
+
+    def __init__(self, named_params, alpha1, alpha2, warmup_steps):
+        super().__init__(moving_average_method="ema", alpha=alpha1, named_params=named_params)
+
+        self.alpha2 = alpha2
+        self.warmup_steps = warmup_steps
+
+    def step(self):
+        if self.num_acc_steps == self.warmup_steps:
+            self.alpha = self.alpha2
+
+        super(TwoPhaseExponentialMovingAverage, self).step()
+
+
+def build_ma(training_configs, names_params):
+    if training_configs['moving_average_method'] == "two_phase_ema":
+        ma = TwoPhaseExponentialMovingAverage(
+            named_params=names_params,
+            alpha1=training_configs['moving_average_alpha'],
+            alpha2=training_configs['moving_average_alpha_2'],
+            warmup_steps=training_configs['moving_average_warmup']
+        )
+    elif training_configs['moving_average_method'] is not None:
+        ma = MovingAverage(moving_average_method=training_configs['moving_average_method'],
+                           named_params=names_params,
+                           alpha=training_configs['moving_average_alpha'])
+    else:
+        ma = None
+
+    return ma

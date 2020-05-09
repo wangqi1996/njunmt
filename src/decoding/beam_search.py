@@ -22,12 +22,12 @@
 
 import torch
 
-from src.data.vocabulary import BOS, EOS, PAD
 from src.models.base import NMTModel
+from src.utils.common_utils import Constants
 from .utils import mask_scores, tensor_gather_helper
 
 
-def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0):
+def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0, sample_K=0, seed=0):
     """
 
     Args:
@@ -49,17 +49,18 @@ def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0):
     beam_mask = src_seqs.new(batch_size, beam_size).fill_(1).float()
     final_lengths = src_seqs.new(batch_size, beam_size).zero_().float()
     beam_scores = src_seqs.new(batch_size, beam_size).zero_().float()
-    final_word_indices = src_seqs.new(batch_size, beam_size, 1).fill_(BOS)
+    final_word_indices = src_seqs.new(batch_size, beam_size, 1).fill_(Constants.BOS)
 
     dec_states = init_dec_states
 
     for t in range(max_steps):
 
-        next_scores, dec_states = nmt_model.decode(final_word_indices.view(batch_size * beam_size, -1), dec_states)
+        next_scores, dec_states = nmt_model.decode(final_word_indices.view(batch_size * beam_size, -1), dec_states,
+                                                   sample_K=sample_K, seed=seed)
 
         next_scores = - next_scores  # convert to negative log_probs
         next_scores = next_scores.view(batch_size, beam_size, -1)
-        next_scores = mask_scores(scores=next_scores, beam_mask=beam_mask)
+        next_scores = mask_scores(scores=next_scores, beam_mask=beam_mask, eos_idx=Constants.EOS)
 
         beam_scores = next_scores + beam_scores.unsqueeze(2)  # [B, Bm, N] + [B, Bm, 1] ==> [B, Bm, N]
 
@@ -105,12 +106,13 @@ def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0):
                                              beam_size=beam_size,
                                              gather_shape=[-1])
 
-        dec_states = nmt_model.reorder_dec_states(dec_states, new_beam_indices=next_beam_ids, beam_size=beam_size)
+        dec_states = nmt_model.reorder_dec_states(dec_states, new_beam_indices=next_beam_ids, batch_size=batch_size,
+                                                  beam_size=beam_size)
 
         # If next_word_ids is EOS, beam_mask_ should be 0.0
-        beam_mask_ = 1.0 - next_word_ids.eq(EOS).float()
+        beam_mask_ = 1.0 - next_word_ids.eq(Constants.EOS).float()
         next_word_ids.masked_fill_((beam_mask_ + beam_mask).eq(0.0),
-                                   PAD)  # If last step a EOS is already generated, we replace the last token as PAD
+                                   Constants.PAD)  # If last step a EOS is already generated, we replace the last token as PAD
         beam_mask = beam_mask * beam_mask_
 
         # # If an EOS or PAD is encountered, set the beam mask to 0.0

@@ -1,8 +1,14 @@
+import math
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
-# from torch.autograd import Variable
+import torch.nn.functional as F
+
 import src.utils.init as my_init
-from .basic import BottleSoftmax
+from .tensor_utils import tile_batch, FLOAT32_INF
+
 
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
@@ -11,7 +17,6 @@ class ScaledDotProductAttention(nn.Module):
         super(ScaledDotProductAttention, self).__init__()
         self.temper = d_model ** 0.5
         self.dropout = nn.Dropout(attn_dropout)
-        self.softmax = BottleSoftmax(dim=1)
 
     def forward(self, q, k, v, attn_mask=None):
         """
@@ -23,12 +28,12 @@ class ScaledDotProductAttention(nn.Module):
 
         if attn_mask is not None:
             assert attn_mask.size() == attn.size(), \
-                    'Attention mask shape {} mismatch ' \
-                    'with Attention logit tensor shape ' \
-                    '{}.'.format(attn_mask.size(), attn.size())
-            attn = attn.masked_fill(attn_mask, -1e18)
+                'Attention mask shape {} mismatch ' \
+                'with Attention logit tensor shape ' \
+                '{}.'.format(attn_mask.size(), attn.size())
+            attn = attn.masked_fill(attn_mask, -FLOAT32_INF)
 
-        attn = self.softmax(attn)
+        attn = F.softmax(attn, dim=-1)
         attn = self.dropout(attn)
         output = torch.bmm(attn, v)
 
@@ -52,7 +57,6 @@ class BahdanauAttention(nn.Module):
         self.linear_query = nn.Linear(in_features=self.query_size, out_features=self.hidden_size)
         self.linear_logit = nn.Linear(in_features=self.hidden_size, out_features=1)
 
-        self.softmax = BottleSoftmax(dim=1)
         self.tanh = nn.Tanh()
 
         self._reset_parameters()
@@ -64,7 +68,6 @@ class BahdanauAttention(nn.Module):
     def compute_cache(self, memory):
 
         return self.linear_key(memory)
-
 
     def forward(self, query, memory, cache=None, mask=None):
         """
@@ -87,12 +90,12 @@ class BahdanauAttention(nn.Module):
         batch_size, q_len, q_size = query.size()
         _, m_len, m_size = memory.size()
 
-        q = self.linear_query(query.view(-1, q_size)) # [batch_size, q_len, hidden_size]
+        q = self.linear_query(query.view(-1, q_size))  # [batch_size, q_len, hidden_size]
 
         if cache is not None:
             k = cache
         else:
-            k = self.linear_key(memory.view(-1, m_size)) # [batch_size, m_len, hidden_size]
+            k = self.linear_key(memory.view(-1, m_size))  # [batch_size, m_len, hidden_size]
 
         # logit = q.unsqueeze(0) + k # [mem_len, batch_size, dim]
         logits = q.view(batch_size, q_len, 1, -1) + k.view(batch_size, 1, m_len, -1)
@@ -100,16 +103,142 @@ class BahdanauAttention(nn.Module):
         logits = self.linear_logit(logits.view(-1, self.hidden_size)).view(batch_size, q_len, m_len)
 
         if mask is not None:
-            mask_ = mask.unsqueeze(1) # [batch_size, 1, m_len]
+            mask_ = mask.unsqueeze(1)  # [batch_size, 1, m_len]
             logits = logits.masked_fill(mask_, -1e18)
 
-        weights = self.softmax(logits) # [batch_size, q_len, m_len]
+        weights = F.softmax(logits, dim=-1)  # [batch_size, q_len, m_len]
 
         # [batch_size, q_len, m_len] @ [batch_size, m_len, m_size]
         # ==> [batch_size, q_len, m_size]
         attns = torch.bmm(weights, memory)
 
         if one_step:
-            attns = attns.squeeze(1) # ==> [batch_size, q_len]
+            attns = attns.squeeze(1)  # ==> [batch_size, q_len]
 
         return attns, weights
+
+
+class MultiHeadedAttention(nn.Module):
+    def __init__(self, model_dim, head_count, dim_per_head=None, dropout=0.1, exclude_diagonal=False):
+
+        super(MultiHeadedAttention, self).__init__()
+
+        if dim_per_head is None:
+            assert model_dim % head_count == 0
+            dim_per_head = model_dim // head_count
+
+        self.head_count = head_count
+
+        self.dim_per_head = dim_per_head
+
+        self.model_dim = model_dim
+
+        self.linear_keys = nn.Linear(model_dim,
+                                     head_count * self.dim_per_head)
+        self.linear_values = nn.Linear(model_dim,
+                                       head_count * self.dim_per_head)
+        self.linear_query = nn.Linear(model_dim,
+                                      head_count * self.dim_per_head)
+        self.dropout = nn.Dropout(dropout)
+        self.final_linear = nn.Linear(self.dim_per_head * head_count, model_dim)
+        self.exclude_diagonal = exclude_diagonal
+
+    def _split_heads(self, x):
+
+        batch_size = x.size(0)
+
+        # [batch_size * n_head, seq_len, dim_per_head]
+        return x.view(batch_size, -1, self.head_count, self.dim_per_head) \
+            .transpose(1, 2).contiguous().view(batch_size * self.head_count, -1, self.dim_per_head)
+
+    def _combine_heads(self, x):
+
+        """:param x: [batch_size * head_count, seq_len, dim_per_head]"""
+        seq_len = x.size(1)
+
+        return x.view(-1, self.head_count, seq_len, self.dim_per_head).transpose(1, 2).contiguous() \
+            .view(-1, seq_len, self.head_count * self.dim_per_head)
+
+    def forward(self, key, value, query, mask=None, enc_attn_cache=None, self_attn_cache=None, sample_K=0, seed=0):
+        """
+        Compute the context vector and the attention vectors.
+
+        Args:
+           key (`FloatTensor`): set of `key_len`
+                key vectors `[batch, key_len, dim]`
+           value (`FloatTensor`): set of `key_len`
+                value vectors `[batch, key_len, dim]`
+           query (`FloatTensor`): set of `query_len`
+                 query vectors  `[batch, query_len, dim]`
+           mask: binary mask indicating which keys have
+                 non-zero attention `[batch, query_len, key_len]`
+        Returns:
+           (`FloatTensor`, `FloatTensor`) :
+
+           * output context vectors `[batch, query_len, dim]`
+           * one of the attention vectors `[batch, query_len, key_len]`
+        """
+
+        batch_size = key.size(0)
+        dim_per_head = self.dim_per_head
+        head_count = self.head_count
+
+        # 1) Project key, value, and query.
+        if enc_attn_cache is not None:
+            key_up, value_up = enc_attn_cache
+        else:
+            key_up = self._split_heads(self.linear_keys(key))  # [batch_size * num_head, seq_len, dim_head]
+            value_up = self._split_heads(self.linear_values(value))
+
+        if self_attn_cache is not None:
+            key_up_prev, value_up_prev = self_attn_cache
+            # Append current key and value to the cache
+            key_up = torch.cat([key_up_prev, key_up], dim=1)
+            value_up = torch.cat([value_up_prev, value_up], dim=1)
+
+        query_up = self._split_heads(self.linear_query(query))
+
+        key_len = key_up.size(1)
+        query_len = query_up.size(1)
+
+        # 2) Calculate and scale scores.
+        query_up = query_up / math.sqrt(dim_per_head)
+        scores = torch.bmm(query_up, key_up.transpose(1, 2))
+
+        if mask is not None:
+            mask = tile_batch(mask, self.head_count)
+            scores = scores.masked_fill(mask, -1e18)
+
+        if self.exclude_diagonal:
+            mask = torch.arange(0, scores.size(2)).to(scores).long()
+            mask = mask.expand(scores.size(0), 1, mask.size(-1))
+            scores.scatter_(1, mask, -FLOAT32_INF)
+
+        # 3) Apply attention dropout and compute context vectors.
+        attn = F.softmax(scores, dim=-1)  # [bsz * n_head, q_len, k_len]
+
+        # sample_K=0相当于不复制,故训练时，设置sample_K=0
+        if sample_K > 0:
+            # random.seed(seed)
+            # [batch_size, head_count]
+            attn = attn.view(batch_size, head_count, query_len, key_len)
+            candidate = attn.argmax(-1)[:, :, 0].cpu().numpy()
+            for batch in range(attn.shape[0]):
+                times = np.zeros(attn.shape[-1])
+                for can in candidate[batch]:
+                    times[can] += 1
+
+                if times.max() <= sample_K:
+                    sample_head = random.randint(0, head_count - 1)
+                    attn[batch] = attn[batch, sample_head, :, :].unsqueeze(0).repeat(head_count, 1, 1)
+            attn = attn.view(batch_size * head_count, query_len, key_len)
+
+        drop_attn = self.dropout(attn)
+        context = self._combine_heads(torch.bmm(drop_attn, value_up))
+
+        output = self.final_linear(context)
+
+        # Return one attn
+        top_attn = attn.view(batch_size, head_count, query_len, key_len)[:, 0, :, :].contiguous()
+        # END CHECK
+        return output, top_attn, [key_up, value_up]

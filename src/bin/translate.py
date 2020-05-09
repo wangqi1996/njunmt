@@ -1,5 +1,8 @@
 import argparse
+import os
+
 from src.main import translate
+from src.bin import auto_mkdir
 
 parser = argparse.ArgumentParser()
 
@@ -35,15 +38,38 @@ parser.add_argument("--max_steps", type=int, default=150,
 parser.add_argument("--alpha", type=float, default=-1.0,
                     help="""Factor to do length penalty. Negative value means close length penalty.""")
 
-def run(**kwargs):
+parser.add_argument("--multi_gpu", action="store_true",
+                    help="""Running on multiple GPUs (No need to manually add this option).""")
 
+parser.add_argument("--shared_dir", type=str, default=None,
+                    help="""Shared directory across nodes. Default is '/tmp'""")
+
+parser.add_argument("--sample_K", type=int, default=3,
+                    help="""sample_K""")
+
+parser.add_argument("--seed", type=int, default=1234,
+                    help="""seed""")
+
+parser.add_argument("--copy_head", action="store_true")
+
+parser.add_argument("--ref_path", type=str,
+                    help="""ref path""")
+
+parser.add_argument("--num_refs", type=int, default=1,
+                    help="""num_refs""")
+
+
+def run(**kwargs):
     args = parser.parse_args()
 
     # Modify some options.
     for k, v in kwargs.items():
         setattr(args, k, v)
 
+    auto_mkdir(os.path.dirname(args.saveto))
+
     translate(args)
+
 
 if __name__ == '__main__':
     run()

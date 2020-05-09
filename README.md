@@ -6,6 +6,21 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Build Status](https://travis-ci.com/whr94621/NJUNMT-pytorch.svg?branch=dev-travis-ci)](https://travis-ci.com/whr94621/NJUNMT-pytorch)
 
+## Table of Contents
+- [NJUNMT-pytorch](#njunmt-pytorch)
+  - [English, 中文](#english-%E4%B8%AD%E6%96%87)
+  - [Table of Contents](#table-of-contents)
+  - [Requirements](#requirements)
+  - [Usage](#usage)
+    - [0. Quick Start](#0-quick-start)
+    - [1. Build Vocabulary](#1-build-vocabulary)
+    - [2. Write Configuration File](#2-write-configuration-file)
+    - [3. Training](#3-training)
+    - [4. Translation](#4-translation)
+  - [Multi-GPU](#multi-gpu)
+  - [Benchmark](#benchmark)
+  - [Contact](#contact)
+
 NJUNMT-pytorch is an open-source toolkit for neural machine translation.
 This toolkit is highly research-oriented, which contains some common baseline
 model:
@@ -16,23 +31,10 @@ only pytorch implementation which is exactly the same as original model.([nmtpyt
 - [Attention is all you need](https://arxiv.org/abs/1706.03762): A strong nmt model introduced by Google, which only relies on attenion
 mechanism.
 
-## Table of Contents
-- [NJUNMT-pytorch](#njunmt-pytorch)
-    - [Table of Contents](#table-of-contents)
-    - [Requirements](#requirements)
-    - [Usage](#usage)
-        - [0. Quick Start](#0-quick-start)
-        - [1. Build Vocabulary](#1-build-vocabulary)
-        - [2. Write Configuration File](#2-write-configuration-file)
-        - [3. Training](#3-training)
-        - [4. Translation](#4-translation)
-    - [Benchmark](#benchmark)
-    - [Contact](#contact)
-
 ## Requirements
 
 - python 3.5+
-- pytorch 0.4.0+
+- pytorch 1.0
 - tqdm
 - tensorboardX
 - sacrebleu
@@ -127,6 +129,10 @@ python -m src.bin.translate \
 See detail options by running ```python -m src.bin.translate --help```.
 
 Also our code support ensemble decoding. See more options by running ```python -m src.bin.ensemble_translate --help```
+
+## Multi-GPU
+
+See [distributed.md](./docs/en/distributed.md)
 
 ## Benchmark
 

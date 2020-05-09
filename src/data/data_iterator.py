@@ -1,18 +1,45 @@
-import random
-from typing import Iterator
-import numpy as np
-from itertools import count
+# MIT License
 
-from src.utils.common_utils import GlobalNames
+# Copyright (c) 2018 the NJUNMT-pytorch authors.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+import itertools
+import random
+from itertools import count
+from typing import Iterable, Generator
+from typing import List
+
+import numpy as np
+
+from src.utils.common_utils import Constants
 from .dataset import Record, zip_records
 
 __all__ = [
     'DataIterator'
 ]
 
-random.seed(GlobalNames.SEED)
+random.seed(Constants.SEED)
 
-DEFAULT_BUFFER_SIZE_FACTOR = 20
+
+def argsort(seq: List):
+    return [p[0] for p in sorted([(i, e) for i, e in enumerate(seq)], key=lambda p: p[1])]
 
 
 class Batch(object):
@@ -52,71 +79,17 @@ class Batch(object):
         return cls(*records)
 
 
-def batching(records, batch_size, batching_key):
-    batches = []
-    batch_buffer = []
+def fill_buffer(data_iter, buffer_size):
+    """
+    Initialize a buffer from a iterator
+    """
 
-    num_samples = 0
-
-    if batching_key == "samples":
-        for record in records:
-            batch_buffer.append(record)
-            num_samples += 1
-
-            if num_samples >= batch_size:
-                batches.append(Batch.pack(*batch_buffer))
-
-                num_samples = 0
-                batch_buffer = []
-    else:
-        max_len = 0
-        for record in records:
-            batch_buffer.append(record)
-
-            num_samples += 1
-            max_len = max(max_len, record.index)
-
-            if max_len * num_samples >= batch_size:
-                batches.append(Batch.pack(*batch_buffer))
-
-                num_samples = 0
-                max_len = 0
-                batch_buffer = []
-
-    if len(batch_buffer) > 0:
-        batches.append(Batch.pack(*batch_buffer))
-
-    return batches
-
-
-def fill_buffer(data_iter, stop, key):
-    records = []
-
-    n_samples = 0
-    key_values = 0
-
-    while True:
-        try:
-            record = next(data_iter)
-        except StopIteration:
-            break
-
-        records.append(record)
-
-        n_samples += 1
-        key_values += record.index
-
-        if key == "samples":
-            if n_samples >= stop:
-                break
-        else:
-            if key_values >= stop:
-                break
+    records = list(itertools.islice(data_iter, buffer_size))
 
     return records
 
 
-def numbering_records_iter(record_iter: Iterator[Record]):
+def numbering_records_iterator(record_iter: Iterable[Record]):
     """Numbering iterator from dataset.
     """
     for ii in count():
@@ -125,20 +98,89 @@ def numbering_records_iter(record_iter: Iterator[Record]):
         except StopIteration:
             break
 
-        yield zip_records(Record(ii, index=-float('inf')), record)
+        yield zip_records(Record(ii, size=-float('inf')), record)
 
 
-def add_noise_to_length(lengths, noise=1.0):
-    """Add noise to the length of sequences.
+def shuffle_iterator(iterator: Iterable[Record], buffer_size) -> Generator[Record, None, None]:
+    buffer = fill_buffer(iterator, buffer_size=buffer_size)
+    random.shuffle(buffer)
 
-    Args:
-        lengths: The length of sequences.
-        noise_ratio: The ratio to add noise to the lengths.
-    """
+    for item in iterator:
+        idx = random.randint(0, buffer_size - 1)
 
-    noisy_lengths = [l + np.random.uniform(- noise, noise) for l in lengths]
+        yield buffer[idx]
 
-    return noisy_lengths
+        buffer[idx] = item
+
+    for item in buffer:
+        yield item
+
+
+def split_shards_iterator(iterator: Iterable[Record], number_shards, n_shard) -> Generator[Record, None, None]:
+    for item in itertools.islice(iterator, n_shard, None, number_shards):
+        yield item
+
+
+def batching_iterator(iterator: Iterable[Record], batch_size, batching_key,
+                      use_bucket=False, buffer_size=10000) -> Generator[Batch, None, None]:
+    buffer = []
+    batch = []  # buffer for building a batch, save the indices of records in the buffer
+
+    while True:
+        # allocate a buffer for bucketing, merge unbatched records from last iteration
+        # new buffer is composed of residual elements in previous batch
+        # and newly allocated buffer
+
+        buffer_inc = fill_buffer(iterator, buffer_size=buffer_size - len(batch))
+
+        if len(buffer_inc) == 0:
+            break
+        else:
+            buffer = [buffer[idx] for idx in batch] + buffer_inc
+            del buffer_inc
+            batch = []
+
+        num_samples = 0
+        max_token_per_batch = 0
+
+        # If use bucketing
+        # sort records in buffer by size
+        if use_bucket:
+            sorted_indices = argsort([record.size for record in buffer])
+        else:
+            sorted_indices = list(range(len(buffer)))
+
+        # batching records in the buffer
+        batch_queue = []
+        for idx in sorted_indices:
+
+            batch.append(idx)
+            num_samples += 1
+
+            if batching_key == "samples":
+                if num_samples >= batch_size:
+                    batch_queue.append(batch[:])
+                    num_samples = 0
+                    batch = []
+            else:
+                max_token_per_batch = max(max_token_per_batch, buffer[idx].size)
+
+                if max_token_per_batch * num_samples >= batch_size:
+                    batch_queue.append(batch[:])
+                    num_samples = 0
+                    max_token_per_batch = 0
+                    batch = []
+
+        # shuffle the order of batches
+        random.shuffle(batch_queue)
+
+        for _batch in batch_queue:
+            yield Batch.pack(*[buffer[idx] for idx in _batch])
+
+        batch_queue = []
+
+    if len(batch) > 0:
+        yield Batch.pack(*[buffer[idx] for idx in batch])
 
 
 class DataIterator(object):
@@ -151,10 +193,13 @@ class DataIterator(object):
     def __init__(self,
                  dataset,
                  batch_size,
-                 buffer_size=None,
+                 buffer_size=10000,
                  use_bucket=True,
                  batching_func="samples",
-                 numbering=False
+                 numbering=False,
+                 shuffle=False,
+                 world_size=1,
+                 rank=0
                  ):
 
         """ Build data iterator given a dataset
@@ -164,10 +209,15 @@ class DataIterator(object):
             batch_size: Integer. Size of a batch. When batching_key is "samples", it represents the
                 the number of samples. When batching_key is "tokens", it represents the tokens in a batch.
             use_bucket: Boolean value. Whether to use bucket.
-            batching_key: Criterion to allocate a batch. Can only be "samples" or "tokens"
+            2batching_key: Criterion to allocate a batch. Can only be "samples" or "tokens"
+            buffer_size: How many samples can be stored in memory for buffer. There are two places which need buffer--
+                shuffle_iterator and bucket_iterator, so the actual memory consumption would be two times if you enable
+                this two iterators at the same time.
         """
+
         self.dataset = dataset
         self.batch_size = batch_size
+        self.shuffle = shuffle
 
         # Batching Key
         #
@@ -188,93 +238,53 @@ class DataIterator(object):
         # else we suppose that their are 50 tokens in one sample and then estimate
         # the number of samples in one batch as self.batch_size // 50
 
-        if buffer_size is None:
-            buffer_size = self.batch_size * DEFAULT_BUFFER_SIZE_FACTOR
-
-        self._buffer_size = buffer_size
-
+        self.buffer_size = buffer_size
         self.use_bucket = use_bucket
-
         self.numbering = numbering
+
+        # For distributed learning
+        self.world_size = world_size
+        self.rank = rank
 
         self.reset()
 
     def __len__(self):
         return len(self.dataset)
 
-    @property
-    def n_datasets(self):
-        return self.dataset.n_fields
-
-    def _fill_buffer(self, batch_size=None):
-
-        if batch_size is None:
-            batch_size = self.batch_size
-
-        # 1. Allocate a new buffer
-        inc_buffer = fill_buffer(self.data_iter, stop=self._buffer_size, key=self._batching_key)
-
-        if len(inc_buffer) <= 0:
-            # data_iter reach the end of the dataset
-            self._end = True
-            return
-
-        # 2. Merge the residual samples in previous buffer (if any) into the inc_buffer
-        if len(self.buffer) > 0:
-            new_buffer = self.buffer[0].content + inc_buffer
-        else:
-            new_buffer = inc_buffer
-
-        # 3. Split buffer into batches. If ues_bucket is enable,
-        # we sort the whole buffer according to the length of the sentence.
-        # In order to randomize the process of batching, we add a little bit noise on the length.
-
-        if self.use_bucket:
-            scores = np.array([record.index for record in new_buffer])
-            noisy_scores = add_noise_to_length(scores)
-            sorted_indices = np.argsort(noisy_scores).tolist()
-            new_buffer = [new_buffer[i] for i in sorted_indices]
-
-        new_batch_buffer = batching(new_buffer, batch_size=batch_size, batching_key=self._batching_key)
-        del new_buffer  # release memory
-
-        self.buffer = new_batch_buffer
-
-    @property
-    def is_end(self):
-        return self._end
-
     def reset(self):
 
         self.buffer = []
-        data_iter = self.dataset.data_iter()
-        if self.numbering:
-            data_iter = numbering_records_iter(data_iter)
-        self.data_iter = data_iter
 
-        self._end = False
+        # 1. build data_iterator from dataset
+        data_iter = self.dataset.read()
+
+        # 2. numbering (optional)
+        if self.numbering:
+            data_iter = numbering_records_iterator(data_iter)
+
+        # 3. distributed(optional)
+        if self.world_size > 1:
+            data_iter = split_shards_iterator(data_iter, number_shards=self.world_size, n_shard=self.rank)
+
+        # 4. shuffle (optional)
+        if self.shuffle:
+            data_iter = shuffle_iterator(data_iter, buffer_size=self.buffer_size)
+
+        # 5. bucketing (optional) & batching
+
+        data_iter = batching_iterator(data_iter, batch_size=self.batch_size, batching_key=self._batching_key,
+                                      use_bucket=self.use_bucket, buffer_size=self.buffer_size)
+
+        self.data_iter = data_iter
 
     def build_generator(self, batch_size=None):
 
         while True:
 
-            # We re-allocate the buffer when there at most on batch.
-            # Usually this batch is not full.
-
-            if len(self.buffer) <= 1:
-                self._fill_buffer(batch_size=batch_size)
-
-            if len(self.buffer) == 0:
-                """Reach the end of the dataset, exit.
-                """
-                self.reset()
-                break
-
             # Accumulated batches until reach the batch_size
-
             try:
-                batch = self.buffer.pop(0)
-            except IndexError:
+                batch = next(self.data_iter)
+            except StopIteration:
                 self.reset()
                 break
 

@@ -1,6 +1,8 @@
 import argparse
-from src.main import train
-from . import auto_mkdir
+
+from src.bin import auto_mkdir
+from src.task.multi_loss import train as odc_train
+from src.task.nmt import train as nmt_train
 
 parser = argparse.ArgumentParser()
 
@@ -25,10 +27,24 @@ parser.add_argument('--debug', action="store_true",
 parser.add_argument('--use_gpu', action="store_true",
                     help="Whether to use GPU.")
 
-parser.add_argument('--pretrain_path', type=str, default="", help="The path for pretrained model.")
+parser.add_argument('--pretrain_path', type=str, default=None, help="The path for pretrained model.")
 
 parser.add_argument("--valid_path", type=str, default="./valid",
                     help="""Path to save translation for bleu evaulation. Default is ./valid.""")
+
+parser.add_argument("--multi_gpu", action="store_true",
+                    help="""Running on multiple GPUs (No need to manually add this option).""")
+
+parser.add_argument("--shared_dir", type=str, default="/tmp",
+                    help="""Shared directory across nodes. Default is '/tmp'""")
+
+parser.add_argument("--predefined_config", type=str, default=None,
+                    help="""Use predefined configuration.""")
+
+parser.add_argument('--display_loss_detail', action="store_true",
+                    help="Whether to display loss detail.")
+
+parser.add_argument("--task", type=str, choices=["nmt", "odc"], default="nmt")
 
 
 def run(**kwargs):
@@ -41,8 +57,12 @@ def run(**kwargs):
     auto_mkdir(args.log_path)
     auto_mkdir(args.saveto)
     auto_mkdir(args.valid_path)
-
-    train(args)
+    if args.task == 'nmt':
+        nmt_train(args)
+    elif args.task == 'odc':
+        odc_train(args)
+    else:
+        raise ValueError("not support task!")
 
 
 if __name__ == '__main__':

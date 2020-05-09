@@ -21,8 +21,9 @@
 # SOFTWARE.
 
 import os
-from src.utils.logging import INFO
+
 import unittests.test_utils as test_utils
+from src.utils.logging import INFO
 
 
 def test_dl4mt_train(test_dir, use_gpu=False):
@@ -45,14 +46,14 @@ def test_dl4mt_train(test_dir, use_gpu=False):
 
 def test_dl4mt_inference(test_dir, use_gpu=False):
     from src.bin import translate
-    from src.utils.common_utils import GlobalNames
+    from src.utils.common_utils import Constants
 
     config_path = "./unittests/configs/test_dl4mt.yaml"
 
     saveto = os.path.join(test_dir, "save")
     model_name = test_utils.get_model_name(config_path)
-    model_path = os.path.join(saveto, model_name + GlobalNames.MY_BEST_MODEL_SUFFIX + ".final")
-    source_path = "./unittests/data/dev/zh.0"
+    model_path = os.path.join(saveto, model_name + Constants.MY_BEST_MODEL_SUFFIX + ".final")
+    source_path = "./unittests/data/dev.de"
     batch_size = 3
     beam_size = 3
 
@@ -74,6 +75,8 @@ if __name__ == '__main__':
 
     test_dir = "./tmp"
 
+    test_utils.rm_tmp_dir(test_dir)
+
     if not os.path.exists(test_dir):
         os.makedirs(test_dir, exist_ok=True)
 
@@ -88,5 +91,3 @@ if __name__ == '__main__':
     test_dl4mt_inference(test_dir, use_gpu=args.use_gpu)
     INFO("Done.")
     INFO("=" * 20)
-
-    test_utils.rm_tmp_dir(test_dir)
