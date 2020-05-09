@@ -24,8 +24,23 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+from src.utils.common_utils import register
+
+ACTIVATION = dict()
 
 
+def register_activation(name: str):
+    return register(name, ACTIVATION)
+
+
+@register_activation("relu")
+class Relu(nn.ReLU):
+    pass
+
+
+@register_activation("gelu")
 class GELU(nn.Module):
 
     def __init__(self):
@@ -33,3 +48,23 @@ class GELU(nn.Module):
 
     def forward(self, input):
         return 0.5 * input * (1.0 + torch.erf(input / math.sqrt(2.0)))
+
+
+@register_activation("swish")
+class swish(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        output = x * F.sigmoid(x)
+        return output
+
+
+def build_activation(name: str):
+    if name is None:
+        return None
+    elif name not in ACTIVATION:
+        raise KeyError("Unknown scheduler name {0}. Do not use lr_scheduling.".format(name))
+    else:
+        return ACTIVATION[name]()

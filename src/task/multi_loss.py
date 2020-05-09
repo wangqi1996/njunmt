@@ -1,27 +1,36 @@
 import os
-import os
 import time
 
 import numpy as np
 import torch
-import yaml
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 import src.distributed as dist
+from scripts.checkpoints_average import average_checkpoints
 from src.data.data_iterator import DataIterator
 from src.data.dataset import TextLineDataset, ZipDataset
 from src.data.vocabulary import Vocabulary
-from src.decoding import beam_search, ensemble_beam_search
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model
-from src.modules.criterions import NMTCriterion
+from src.modules.criterions import NMTCriterion, CombinationCriterion
 from src.optim import Optimizer
 from src.optim.lr_scheduler import build_scheduler
+from src.task.nmt import prepare_configs, set_seed, prepare_data, load_pretrained_model, \
+    bleu_evaluation
 from src.utils.common_utils import *
+from src.utils.common_utils import AverageMeterDict, BestKSaver
 from src.utils.configs import pretty_configs
 from src.utils.logging import *
-from src.utils.moving_average import MovingAverage
+from src.utils.moving_average import build_ma
+from src.utils.odc_util import check_odc_config, get_teacher_model
+
+
+def add_dict_value(dict1, dict2):
+    """ add dict2 value to dict1"""
+    for key, value in dict2.items():
+        dict1[key] = dict1.get(key, 0) + value
+    return dict1
 
 
 def compute_forward(model,
@@ -48,178 +57,26 @@ def compute_forward(model,
         # For training
         with torch.enable_grad():
             log_probs = model(seqs_x, y_inp)
-            loss = critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization)
+            loss, loss_dict = critic(inputs=log_probs, labels=y_label, reduce=False, normalization=normalization,
+                                     seqs_x=seqs_x, y_inp=y_inp)
 
             if norm_by_words:
                 loss = loss.div(words_norm).sum()
+                loss_dict = {name: value.div(words_norm).sum().item() for name, value in loss_dict.items()}
             else:
                 loss = loss.sum()
+                loss_dict = {name: value.sum().item() for name, value in loss_dict.items()}
         torch.autograd.backward(loss)
-        return loss.item()
+        return loss.item(), loss_dict
     else:
         model.eval()
         critic.eval()
         # For compute loss
         with torch.no_grad():
             log_probs = model(seqs_x, y_inp)
-            loss = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True)
-        return loss.item()
-
-
-def inference(valid_iterator,
-              model,
-              vocab_tgt: Vocabulary,
-              batch_size,
-              max_steps,
-              beam_size=5,
-              alpha=-1.0,
-              rank=0,
-              world_size=1,
-              using_numbering_iterator=True,
-              sample_K=0,
-              seed=0
-              ):
-    model.eval()
-    trans_in_all_beams = [[] for _ in range(beam_size)]
-
-    # assert keep_n_beams <= beam_size
-
-    if using_numbering_iterator:
-        numbers = []
-
-    if rank == 0:
-        infer_progress_bar = tqdm(total=len(valid_iterator),
-                                  desc=' - (Infer)  ',
-                                  unit="sents")
-    else:
-        infer_progress_bar = None
-
-    valid_iter = valid_iterator.build_generator(batch_size=batch_size)
-
-    for batch in valid_iter:
-
-        seq_numbers = batch[0]
-
-        if using_numbering_iterator:
-            numbers += seq_numbers
-
-        seqs_x = batch[1]
-
-        if infer_progress_bar is not None:
-            infer_progress_bar.update(len(seqs_x) * world_size)
-
-        x = prepare_data(seqs_x, seqs_y=None, cuda=Constants.USE_GPU)
-
-        with torch.no_grad():
-            word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha,
-                                   sample_K=sample_K, seed=seed)
-
-        word_ids = word_ids.cpu().numpy().tolist()
-
-        # Append result
-        for sent_t in word_ids:
-            for ii, sent_ in enumerate(sent_t):
-                sent_ = vocab_tgt.ids2sent(sent_)
-                if sent_ == "":
-                    sent_ = '%s' % vocab_tgt.id2token(vocab_tgt.eos)
-                trans_in_all_beams[ii].append(sent_)
-
-    if infer_progress_bar is not None:
-        infer_progress_bar.close()
-
-    if world_size > 1:
-
-        if using_numbering_iterator:
-            numbers = combine_from_all_shards(dist.all_gather_py_with_shared_fs(numbers))
-
-        trans_in_all_beams = [combine_from_all_shards(dist.all_gather_py_with_shared_fs(trans)) for trans in
-                              trans_in_all_beams]
-
-    if using_numbering_iterator:
-        origin_order = np.argsort(numbers).tolist()
-
-        trans_in_all_beams = [[trans[ii] for ii in origin_order] for trans in trans_in_all_beams]
-
-    return trans_in_all_beams
-
-
-def ensemble_inference(valid_iterator,
-                       models,
-                       vocab_tgt: Vocabulary,
-                       batch_size,
-                       max_steps,
-                       beam_size=5,
-                       alpha=-1.0,
-                       rank=0,
-                       world_size=1,
-                       using_numbering_iterator=True
-                       ):
-    for model in models:
-        model.eval()
-
-    trans_in_all_beams = [[] for _ in range(beam_size)]
-
-    # assert keep_n_beams <= beam_size
-
-    if using_numbering_iterator:
-        numbers = []
-
-    if rank == 0:
-        infer_progress_bar = tqdm(total=len(valid_iterator),
-                                  desc=' - (Infer)  ',
-                                  unit="sents")
-    else:
-        infer_progress_bar = None
-
-    valid_iter = valid_iterator.build_generator(batch_size=batch_size)
-
-    for batch in valid_iter:
-
-        seq_numbers = batch[0]
-
-        if using_numbering_iterator:
-            numbers += seq_numbers
-
-        seqs_x = batch[1]
-
-        if infer_progress_bar is not None:
-            infer_progress_bar.update(len(seqs_x) * world_size)
-
-        x = prepare_data(seqs_x, seqs_y=None, cuda=Constants.USE_GPU)
-
-        with torch.no_grad():
-            word_ids = ensemble_beam_search(
-                nmt_models=models,
-                beam_size=beam_size,
-                max_steps=max_steps,
-                src_seqs=x,
-                alpha=alpha
-            )
-
-        word_ids = word_ids.cpu().numpy().tolist()
-
-        # Append result
-        for sent_t in word_ids:
-            for ii, sent_ in enumerate(sent_t):
-                sent_ = vocab_tgt.ids2sent(sent_)
-                if sent_ == "":
-                    sent_ = '%s' % vocab_tgt.id2token(vocab_tgt.eos)
-                trans_in_all_beams[ii].append(sent_)
-
-    if infer_progress_bar is not None:
-        infer_progress_bar.close()
-
-    if world_size > 1:
-        if using_numbering_iterator:
-            numbers = dist.all_gather_py_with_shared_fs(numbers)
-
-        trans_in_all_beams = [combine_from_all_shards(trans) for trans in trans_in_all_beams]
-
-    if using_numbering_iterator:
-        origin_order = np.argsort(numbers).tolist()
-        trans_in_all_beams = [[trans[ii] for ii in origin_order] for trans in trans_in_all_beams]
-
-    return trans_in_all_beams
+            loss, loss_dict = critic(inputs=log_probs, labels=y_label, normalization=normalization, reduce=True,
+                                     seqs_x=seqs_x, y_inp=y_inp)
+        return loss.item(), {name: value.mean().item() for name, value in loss_dict.items()}
 
 
 def loss_evaluation(model, critic, valid_iterator, rank=0, world_size=1):
@@ -234,7 +91,7 @@ def loss_evaluation(model, critic, valid_iterator, rank=0, world_size=1):
     n_sents = 0
 
     sum_loss = 0.0
-
+    sum_loss_dict = dict()
     valid_iter = valid_iterator.build_generator()
 
     for batch in valid_iter:
@@ -244,114 +101,25 @@ def loss_evaluation(model, critic, valid_iterator, rank=0, world_size=1):
 
         x, y = prepare_data(seqs_x, seqs_y, cuda=Constants.USE_GPU)
 
-        loss = compute_forward(model=model,
-                               critic=critic,
-                               seqs_x=x,
-                               seqs_y=y,
-                               eval=True)
+        loss, loss_dict = compute_forward(model=model,
+                                          critic=critic,
+                                          seqs_x=x,
+                                          seqs_y=y,
+                                          eval=True)
 
         if np.isnan(loss):
             WARN("NaN detected!")
 
         sum_loss += float(loss)
+        loss_dict = {key: float(value) for key, value in loss_dict.items()}
+        sum_loss_dict = add_dict_value(sum_loss_dict, loss_dict)
 
     if world_size > 1:
         sum_loss = dist.all_reduce_py(sum_loss)
+        sum_loss_dict = dist.all_reduce_py(sum_loss_dict)
         n_sents = dist.all_reduce_py(n_sents)
 
-    return float(sum_loss / n_sents)
-
-
-def bleu_evaluation(uidx,
-                    valid_iterator,
-                    model,
-                    bleu_scorer,
-                    vocab_src,
-                    vocab_tgt,
-                    batch_size,
-                    valid_dir="./valid",
-                    max_steps=10,
-                    beam_size=5,
-                    alpha=-1.0,
-                    rank=0,
-                    world_size=1,
-                    using_numbering_iterator=True
-                    ):
-    translations_in_all_beams = inference(
-        valid_iterator=valid_iterator,
-        model=model,
-        vocab_tgt=vocab_tgt,
-        batch_size=batch_size,
-        max_steps=max_steps,
-        beam_size=beam_size,
-        alpha=alpha,
-        rank=rank,
-        world_size=world_size,
-        using_numbering_iterator=using_numbering_iterator
-    )
-
-    if rank == 0:
-        if not os.path.exists(valid_dir):
-            os.mkdir(valid_dir)
-
-        hyp_path = os.path.join(valid_dir, 'trans.iter{0}.txt'.format(uidx))
-
-        with open(hyp_path, 'w') as f:
-            for line in translations_in_all_beams[0]:
-                f.write('%s\n' % line)
-        with open(hyp_path) as f:
-            bleu_v = bleu_scorer.corpus_bleu(f)
-    else:
-        bleu_v = 0.0
-
-    if world_size > 1:
-        bleu_v = dist.broadcast_py(bleu_v, root_rank=0)
-
-    return bleu_v
-
-
-def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None):
-    """
-    Args:
-        nmt_model: model.
-        pretrain_path ('str'): path to pretrained model.
-        map_dict ('dict'): mapping specific parameter names to those names
-            in current model.
-        exclude_prefix ('dict'): excluding parameters with specific names
-            for pretraining.
-
-    Raises:
-        ValueError: Size not match, parameter name not match or others.
-
-    """
-    if exclude_prefix is None:
-        exclude_prefix = []
-    if pretrain_path is not None:
-        INFO("Loading pretrained model from {}".format(pretrain_path))
-
-        all_parameter_names = set([name for name in nmt_model.state_dict().keys()])
-
-        pretrain_params = torch.load(pretrain_path, map_location=device)
-        for name, params in pretrain_params.items():
-
-            if name not in all_parameter_names:
-                continue
-
-            flag = False
-            for pp in exclude_prefix:
-                if name.startswith(pp):
-                    flag = True
-                    break
-            if flag:
-                continue
-
-            INFO("Loading param: {}...".format(name))
-            try:
-                nmt_model.load_state_dict({name: params}, strict=False)
-            except Exception as e:
-                WARN("{}: {}".format(str(Exception), e))
-
-        INFO("Pretrained model loaded.")
+    return float(sum_loss / n_sents), {key: value / n_sents for key, value in sum_loss_dict.items()}
 
 
 def train(flags):
@@ -408,6 +176,12 @@ def train(flags):
     training_configs = configs['training_configs']
 
     INFO(pretty_configs(configs))
+
+    # use odc
+    if training_configs['use_odc'] is True:
+        ave_best_k = check_odc_config(training_configs)
+    else:
+        ave_best_k = 0
 
     Constants.SEED = training_configs['seed']
 
@@ -493,8 +267,11 @@ def train(flags):
     checkpoint_saver = Saver(save_prefix="{0}.ckpt".format(os.path.join(flags.saveto, flags.model_name)),
                              num_max_keeping=training_configs['num_kept_checkpoints']
                              )
+
     best_model_prefix = os.path.join(flags.saveto, flags.model_name + Constants.MY_BEST_MODEL_SUFFIX)
-    best_model_saver = Saver(save_prefix=best_model_prefix, num_max_keeping=training_configs['num_kept_best_model'])
+
+    best_k_saver = BestKSaver(save_prefix="{0}.best_k_ckpt".format(os.path.join(flags.saveto, flags.model_name)),
+                              num_max_keeping=training_configs['num_kept_best_k_checkpoints'])
 
     # 1. Build Model & Criterion
     INFO('Building model...')
@@ -504,9 +281,13 @@ def train(flags):
                             **model_configs)
     INFO(nmt_model)
 
-    critic = NMTCriterion(label_smoothing=model_configs['label_smoothing'], padding_idx=vocab_tgt.pad)
+    # build teacher model
+    teacher_model, teacher_model_path = get_teacher_model(training_configs, model_configs, vocab_src, vocab_tgt, flags)
 
-    INFO(critic)
+    # build critic
+    critic = CombinationCriterion(model_configs['loss_configs'], padding_idx=vocab_tgt.pad, teacher=teacher_model)
+    # INFO(critic)
+    critic.INFO()
 
     # 2. Move to GPU
     if Constants.USE_GPU:
@@ -543,13 +324,7 @@ def train(flags):
                                 optimizer=optim, scheduler_configs=optimizer_configs['scheduler_configs'])
 
     # 6. build moving average
-
-    if training_configs['moving_average_method'] is not None:
-        ma = MovingAverage(moving_average_method=training_configs['moving_average_method'],
-                           named_params=nmt_model.named_parameters(),
-                           alpha=training_configs['moving_average_alpha'])
-    else:
-        ma = None
+    ma = build_ma(training_configs, nmt_model.named_parameters())
 
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
@@ -577,8 +352,10 @@ def train(flags):
     bad_count = model_collections.get_collection("bad_count", [0])[-1]
     oom_count = model_collections.get_collection("oom_count", [0])[-1]
     is_early_stop = model_collections.get_collection("is_early_stop", [False, ])[-1]
+    teacher_patience = model_collections.get_collection("teacher_patience", [training_configs['teacher_patience']])[-1]
 
     train_loss_meter = AverageMeter()
+    train_loss_dict_meter = AverageMeterDict(critic.get_critic_name())
     sent_per_sec_meter = TimeMeter()
     tok_per_sec_meter = TimeMeter()
 
@@ -586,6 +363,8 @@ def train(flags):
     grad_denom = 0
     train_loss = 0.0
     cum_n_words = 0
+    train_loss_dict = dict()
+    valid_loss = best_valid_loss = float('inf')
 
     if rank == 0:
         summary_writer = SummaryWriter(log_dir=flags.log_path)
@@ -606,7 +385,7 @@ def train(flags):
         training_iter = training_iterator.build_generator()
 
         if rank == 0:
-            training_progress_bar = tqdm(desc='  - (Epoch %d)   ' % eidx,
+            training_progress_bar = tqdm(desc=' - (Epc {}, Upd {}) '.format(eidx, uidx),
                                          total=len(training_iterator),
                                          unit="sents"
                                          )
@@ -624,17 +403,19 @@ def train(flags):
                 # Prepare data
                 x, y = prepare_data(seqs_x, seqs_y, cuda=Constants.USE_GPU)
 
-                loss = compute_forward(model=nmt_model,
-                                       critic=critic,
-                                       seqs_x=x,
-                                       seqs_y=y,
-                                       eval=False,
-                                       normalization=1.0,
-                                       norm_by_words=training_configs["norm_by_words"])
+                loss, loss_dict = compute_forward(model=nmt_model,
+                                                  critic=critic,
+                                                  seqs_x=x,
+                                                  seqs_y=y,
+                                                  eval=False,
+                                                  normalization=1.0,
+                                                  norm_by_words=training_configs["norm_by_words"])
 
                 update_cycle -= 1
                 grad_denom += batch_size
                 train_loss += loss
+                train_loss_dict = add_dict_value(train_loss_dict, loss_dict)
+
 
             except RuntimeError as e:
                 if 'out of memory' in str(e):
@@ -655,6 +436,7 @@ def train(flags):
                 if world_size > 1:
                     grad_denom = dist.all_reduce_py(grad_denom)
                     train_loss = dist.all_reduce_py(train_loss)
+                    train_loss_dict = dist.all_reduce_py(train_loss_dict)
                     cum_n_words = dist.all_reduce_py(cum_n_words)
 
                 # 1. update parameters
@@ -664,6 +446,12 @@ def train(flags):
                 if training_progress_bar is not None:
                     training_progress_bar.update(grad_denom)
                     training_progress_bar.set_description(' - (Epc {}, Upd {}) '.format(eidx, uidx))
+
+                    postfix_str = 'TrainLoss: {:.2f}, ValidLoss(best): {:.2f} ({:.2f}), '.format(train_loss, valid_loss,
+                                                                                                 best_valid_loss)
+                    for critic_name, loss_value in train_loss_dict.items():
+                        postfix_str += (critic_name + ': {:.2f}, ').format(loss_value)
+                    training_progress_bar.set_postfix_str(postfix_str)
 
                 # 2. learning rate scheduling
                 if scheduler is not None and optimizer_configs["schedule_method"] != "loss":
@@ -675,6 +463,7 @@ def train(flags):
 
                 # 4. update meters
                 train_loss_meter.update(train_loss, grad_denom)
+                train_loss_dict_meter.update(train_loss_dict, grad_denom)
                 sent_per_sec_meter.update(grad_denom)
                 tok_per_sec_meter.update(cum_n_words)
 
@@ -684,6 +473,7 @@ def train(flags):
                 uidx += 1
                 cum_n_words = 0.0
                 train_loss = 0.0
+                train_loss_dict = dict()
 
             else:
                 continue
@@ -698,6 +488,11 @@ def train(flags):
                     summary_writer.add_scalar("Speed(sents/sec)", scalar_value=sent_per_sec_meter.ave, global_step=uidx)
                     summary_writer.add_scalar("Speed(words/sec)", scalar_value=tok_per_sec_meter.ave, global_step=uidx)
                     summary_writer.add_scalar("train_loss", scalar_value=train_loss_meter.ave, global_step=uidx)
+                    # add loss for every critic
+                    if flags.display_loss_detail:
+                        combination_loss = train_loss_dict_meter.value
+                        for key, value in combination_loss.items():
+                            summary_writer.add_scalar(key, scalar_value=value, global_step=uidx)
                     summary_writer.add_scalar("lrate", scalar_value=lrate, global_step=uidx)
                     summary_writer.add_scalar("oom_count", scalar_value=oom_count, global_step=uidx)
 
@@ -705,6 +500,7 @@ def train(flags):
                 sent_per_sec_meter.reset()
                 tok_per_sec_meter.reset()
                 train_loss_meter.reset()
+                train_loss_dict_meter.reset()
 
             # ================================================================================== #
             # Loss Validation & Learning rate annealing
@@ -712,14 +508,11 @@ def train(flags):
                                        debug=flags.debug):
                 with cache_parameters(nmt_model):
 
-                    if ma is not None:
-                        nmt_model.load_state_dict(ma.export_ma_params(), strict=False)
-
-                    valid_loss = loss_evaluation(model=nmt_model,
-                                                 critic=critic,
-                                                 valid_iterator=valid_iterator,
-                                                 rank=rank,
-                                                 world_size=world_size)
+                    valid_loss, valid_loss_dict = loss_evaluation(model=nmt_model,
+                                                                  critic=critic,
+                                                                  valid_iterator=valid_iterator,
+                                                                  rank=rank,
+                                                                  world_size=world_size)
 
                 if scheduler is not None and optimizer_configs["schedule_method"] == "loss":
                     scheduler.step(metric=valid_loss)
@@ -727,6 +520,7 @@ def train(flags):
                 model_collections.add_to_collection("history_losses", valid_loss)
 
                 min_history_loss = np.array(model_collections.get_collection("history_losses")).min()
+                best_valid_loss = min_history_loss
 
                 if summary_writer is not None:
                     summary_writer.add_scalar("loss", valid_loss, global_step=uidx)
@@ -734,16 +528,12 @@ def train(flags):
 
             # ================================================================================== #
             # BLEU Validation & Early Stop
-
             if should_trigger_by_steps(global_step=uidx, n_epoch=eidx,
                                        every_n_step=training_configs['bleu_valid_freq'],
                                        min_step=training_configs['bleu_valid_warmup'],
                                        debug=flags.debug):
 
                 with cache_parameters(nmt_model):
-
-                    if ma is not None:
-                        nmt_model.load_state_dict(ma.export_ma_params(), strict=False)
 
                     valid_bleu = bleu_evaluation(uidx=uidx,
                                                  valid_iterator=valid_iterator,
@@ -777,13 +567,6 @@ def train(flags):
                             # 1. save the best model
                             torch.save(nmt_model.state_dict(), best_model_prefix + ".final")
 
-                            # 2. record all several best models
-                            best_model_saver.save(global_step=uidx,
-                                                  model=nmt_model,
-                                                  optim=optim,
-                                                  lr_scheduler=scheduler,
-                                                  collections=model_collections,
-                                                  ma=ma)
                 else:
                     bad_count += 1
 
@@ -793,12 +576,58 @@ def train(flags):
                         WARN("Early Stop!")
                         exit(0)
 
+                if rank == 0:
+                    best_k_saver.save(global_step=uidx,
+                                      metric=valid_bleu,
+                                      model=nmt_model,
+                                      optim=optim,
+                                      lr_scheduler=scheduler,
+                                      collections=model_collections,
+                                      ma=ma)
+
+                # ODC
+                if training_configs['use_odc'] is True:
+                    if valid_bleu >= best_valid_bleu:
+
+                        # choose method to generate teachers from checkpoints
+                        # - best
+                        # - ave_k_best
+                        # - ma
+
+                        if training_configs['teacher_choice'] == 'ma':
+                            teacher_params = ma.export_ma_params()
+                        elif training_configs['teacher_choice'] == 'best':
+                            teacher_params = nmt_model.state_dict()
+                        elif "ave_best" in training_configs['teacher_choice']:
+                            if best_k_saver.num_saved >= ave_best_k:
+                                teacher_params = average_checkpoints(best_k_saver.get_all_ckpt_path()[-ave_best_k:])
+                            else:
+                                teacher_params = nmt_model.state_dict()
+                        else:
+                            raise ValueError(
+                                "can not support teacher choice %s" % training_configs['teacher_choice'])
+                        torch.save(teacher_params, teacher_model_path)
+                        del teacher_params
+                        teacher_patience = 0
+                        critic.set_use_KD(False)
+                    else:
+                        teacher_patience += 1
+                        if teacher_patience >= training_configs['teacher_refresh_warmup']:
+                            teacher_params = torch.load(teacher_model_path, map_location=Constants.CURRENT_DEVICE)
+                            teacher_model.load_state_dict(teacher_params, strict=False)
+                            del teacher_params
+                            critic.reset_teacher(teacher_model)
+                            critic.set_use_KD(True)
+
                 if summary_writer is not None:
                     summary_writer.add_scalar("bad_count", bad_count, uidx)
 
-                INFO("{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4}".format(
+                info_str = "{0} Loss: {1:.2f} BLEU: {2:.2f} lrate: {3:6f} patience: {4} ".format(
                     uidx, valid_loss, valid_bleu, lrate, bad_count
-                ))
+                )
+                for key, value in valid_loss_dict.items():
+                    info_str += (key + ': {0:.2f} '.format(value))
+                INFO(info_str)
 
             # ================================================================================== #
             # Saving checkpoints
@@ -806,7 +635,7 @@ def train(flags):
                 model_collections.add_to_collection("uidx", uidx)
                 model_collections.add_to_collection("eidx", eidx)
                 model_collections.add_to_collection("bad_count", bad_count)
-
+                model_collections.add_to_collection("teacher_patience", teacher_patience)
                 if not is_early_stop:
                     if rank == 0:
                         checkpoint_saver.save(global_step=uidx,
@@ -822,239 +651,3 @@ def train(flags):
         eidx += 1
         if eidx > training_configs["max_epochs"]:
             break
-
-
-def translate(flags):
-    Constants.USE_GPU = flags.use_gpu
-
-    if flags.multi_gpu:
-        dist.distributed_init(flags.shared_dir)
-        world_size = dist.get_world_size()
-        rank = dist.get_rank()
-        local_rank = dist.get_local_rank()
-        torch.cuda.set_device(local_rank)
-    else:
-        world_size = 1
-        rank = 0
-        local_rank = 0
-
-    if rank != 0:
-        close_logging()
-
-    config_path = os.path.abspath(flags.config_path)
-
-    with open(config_path.strip()) as f:
-        configs = yaml.load(f)
-
-    data_configs = configs['data_configs']
-    model_configs = configs['model_configs']
-    training_configs = configs['training_configs']
-
-    timer = Timer()
-    # ================================================================================== #
-    # Load Data
-
-    INFO('Loading data...')
-    timer.tic()
-
-    # Generate target dictionary
-    vocab_src = Vocabulary.build_from_file(**data_configs['vocabularies'][0])
-    vocab_tgt = Vocabulary.build_from_file(**data_configs['vocabularies'][1])
-
-    valid_dataset = TextLineDataset(data_path=flags.source_path,
-                                    vocabulary=vocab_src,
-                                    is_train_dataset=False)
-
-    valid_iterator = DataIterator(dataset=valid_dataset,
-                                  batch_size=flags.batch_size,
-                                  use_bucket=True,
-                                  buffer_size=100000,
-                                  numbering=True,
-                                  world_size=world_size,
-                                  rank=rank
-                                  )
-
-    INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-    # ================================================================================== #
-    # Build Model & Sampler & Validation
-    INFO('Building model...')
-    timer.tic()
-    nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
-                            n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
-                            **model_configs)
-    nmt_model.eval()
-    INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-    INFO('Reloading model parameters...')
-    timer.tic()
-
-    params = load_model_parameters(flags.model_path, map_location="cpu")
-
-    nmt_model.load_state_dict(params)
-
-    if Constants.USE_GPU:
-        nmt_model.cuda()
-
-    INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-    INFO('Begin...')
-    timer.tic()
-
-    if flags.copy_head is False:
-        flags.sample_K = 0
-
-    translations_in_all_beams = inference(
-        valid_iterator=valid_iterator,
-        model=nmt_model,
-        vocab_tgt=vocab_tgt,
-        batch_size=flags.batch_size,
-        max_steps=flags.max_steps,
-        beam_size=flags.beam_size,
-        alpha=flags.alpha,
-        rank=rank,
-        world_size=world_size,
-        using_numbering_iterator=True,
-        sample_K=flags.sample_K,
-        seed=flags.seed
-    )
-
-    acc_time = timer.toc(return_seconds=True)
-    acc_num_tokens = sum([len(line.strip().split()) for line in translations_in_all_beams[0]])
-
-    INFO('Done. Speed: {0:.2f} words/sec'.format(acc_num_tokens / acc_time))
-
-    if rank == 0:
-        keep_n = flags.beam_size if flags.keep_n <= 0 else min(flags.beam_size, flags.keep_n)
-        outputs = ['%s.%d' % (flags.saveto, i) for i in range(keep_n)]
-
-        with batch_open(outputs, 'w') as handles:
-            for ii in range(keep_n):
-                for trans in translations_in_all_beams[ii]:
-                    handles[ii].write('%s\n' % trans)
-
-        # compute bleu score
-        if flags.ref_path is not None:
-            bleu_scorer = SacreBLEUScorer(reference_path=flags.ref_path,
-                                          num_refs=flags.num_refs,
-                                          lang_pair=data_configs["lang_pair"],
-                                          sacrebleu_args=training_configs["bleu_valid_configs"]['sacrebleu_args'],
-                                          postprocess=training_configs["bleu_valid_configs"]['postprocess']
-                                          )
-
-            for i in range(keep_n):
-                with open(outputs[i]) as f:
-                    bleu_v = bleu_scorer.corpus_bleu(f)
-                    print(str(i) + " bleu: " + str(bleu_v))
-
-
-def ensemble_translate(flags):
-    Constants.USE_GPU = flags.use_gpu
-
-    if flags.multi_gpu:
-        dist.distributed_init(flags.shared_dir)
-        world_size = dist.get_world_size()
-        rank = dist.get_rank()
-        local_rank = dist.get_local_rank()
-        torch.cuda.set_device(local_rank)
-    else:
-        world_size = 1
-        rank = 0
-        local_rank = 0
-
-    if rank != 0:
-        close_logging()
-
-    config_path = os.path.abspath(flags.config_path)
-
-    with open(config_path.strip()) as f:
-        configs = yaml.load(f)
-
-    data_configs = configs['data_configs']
-    model_configs = configs['model_configs']
-
-    timer = Timer()
-    # ================================================================================== #
-    # Load Data
-
-    INFO('Loading data...')
-    timer.tic()
-
-    # Generate target dictionary
-    vocab_src = Vocabulary.build_from_file(**data_configs['vocabularies'][0])
-    vocab_tgt = Vocabulary.build_from_file(**data_configs['vocabularies'][1])
-
-    valid_dataset = TextLineDataset(data_path=flags.source_path,
-                                    vocabulary=vocab_src,
-                                    is_train_dataset=False)
-
-    valid_iterator = DataIterator(dataset=valid_dataset,
-                                  batch_size=flags.batch_size,
-                                  use_bucket=True,
-                                  buffer_size=100000,
-                                  numbering=True,
-                                  world_size=world_size,
-                                  rank=rank
-                                  )
-
-    INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-    # ================================================================================== #
-    # Build Model & Sampler & Validation
-    INFO('Building model...')
-    timer.tic()
-
-    nmt_models = []
-
-    model_path = flags.model_path
-
-    for ii in range(len(model_path)):
-
-        nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
-                                n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, **model_configs)
-        nmt_model.eval()
-        INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-        INFO('Reloading model parameters...')
-        timer.tic()
-
-        params = load_model_parameters(model_path[ii], map_location="cpu")
-
-        nmt_model.load_state_dict(params)
-
-        if Constants.USE_GPU:
-            nmt_model.cuda()
-
-        nmt_models.append(nmt_model)
-
-    INFO('Done. Elapsed time {0}'.format(timer.toc()))
-
-    INFO('Begin...')
-    timer.tic()
-
-    translations_in_all_beams = ensemble_inference(
-        valid_iterator=valid_iterator,
-        models=nmt_models,
-        vocab_tgt=vocab_tgt,
-        batch_size=flags.batch_size,
-        max_steps=flags.max_steps,
-        beam_size=flags.beam_size,
-        alpha=flags.alpha,
-        rank=rank,
-        world_size=world_size,
-        using_numbering_iterator=True
-    )
-
-    acc_time = timer.toc(return_seconds=True)
-    acc_num_tokens = sum([len(line.strip().split()) for line in translations_in_all_beams[0]])
-
-    INFO('Done. Speed: {0:.2f} words/sec'.format(acc_num_tokens / acc_time))
-
-    if rank == 0:
-        keep_n = flags.beam_size if flags.keep_n <= 0 else min(flags.beam_size, flags.keep_n)
-        outputs = ['%s.%d' % (flags.saveto, i) for i in range(keep_n)]
-
-        with batch_open(outputs, 'w') as handles:
-            for ii in range(keep_n):
-                for trans in translations_in_all_beams[ii]:
-                    handles[ii].write('%s\n' % trans)

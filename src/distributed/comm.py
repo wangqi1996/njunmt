@@ -76,12 +76,34 @@ def all_reduce_py(data, max_size=65000, average=False, group=None):
     """Apply allreduce to python objects"""
     all_gathered_data = all_gather_py(data=data, max_size=max_size, group=group)
 
-    result = sum(all_gathered_data)
+    result = _sum(all_gathered_data)
 
     if not average:
         return result
     else:
-        return result / all(all_gathered_data)
+        return _div(result, all(all_gathered_data))
+
+
+def _div(a, b):
+    if isinstance(a, dict):
+        new_dict = dict()
+        for key, value in a.items():
+            new_dict[key] = value / b
+        return new_dict
+    else:
+        return a / b
+
+
+def _sum(all_gathered_data):
+    if isinstance(all_gathered_data[0], dict):
+        new_dict = dict()
+        for data in all_gathered_data:
+            for key, value in data.items():
+                new_dict.setdefault(key, 0)
+                new_dict[key] += value
+        return new_dict
+    else:
+        return sum(all_gathered_data)
 
 
 def all_gather_py(data, group=None, max_size=16384):

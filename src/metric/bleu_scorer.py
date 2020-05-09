@@ -1,5 +1,5 @@
 import argparse
-import os
+
 import sacrebleu
 from sacremoses import MosesDetokenizer, MosesDetruecaser
 
@@ -66,6 +66,7 @@ class SacreBLEUScorer(object):
             self.detrucaser = MosesDetruecaser()
 
         self.test_set = test_set
+        self.handlers = None
 
     def _postprocess(self, string: str):
 
@@ -83,6 +84,18 @@ class SacreBLEUScorer(object):
             hyp_in = [self._postprocess(line.strip()) for line in hyp_in]
 
         bleu = sacrebleu.corpus_bleu(sys_stream=hyp_in, ref_streams=self.references,
+                                     lowercase=self.sacrebleu_args.lc,
+                                     tokenize=self.sacrebleu_args.tokenize)
+
+        return bleu.score
+
+    def corpus_single_bleu(self, hyp_in, index):
+        if self.postprocess:
+            hyp_in = [self._postprocess(line.strip()) for line in hyp_in]
+
+
+        references = [[r[index]] for r in self.references]
+        bleu = sacrebleu.corpus_bleu(sys_stream=hyp_in, ref_streams=references,
                                      lowercase=self.sacrebleu_args.lc,
                                      tokenize=self.sacrebleu_args.tokenize)
 

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 
 from src.decoding.utils import tensor_gather_helper
 from src.models.base import NMTModel
-from src.modules.activation import GELU
+from src.modules.activation import build_activation
 from src.modules.attention import MultiHeadedAttention
 from src.modules.basic import BottleLinear as Linear
 from src.modules.embeddings import Embeddings
@@ -77,13 +77,7 @@ class PositionwiseFeedForward(nn.Module):
         self.w_2 = nn.Linear(hidden_size, size)
         # Save a little memory, by doing inplace.
         self.dropout = nn.Dropout(dropout)
-
-        if activation == "relu":
-            self.activation = nn.ReLU(inplace=False)
-        elif activation == "gelu":
-            self.activation = GELU()
-        else:
-            raise ValueError
+        self.activation = build_activation(activation)
 
     def forward(self, x):
         return self.w_2(self.dropout(self.activation(self.w_1(x))))

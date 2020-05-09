@@ -1,7 +1,8 @@
 import argparse
 
-from src.main import train
 from src.bin import auto_mkdir
+from src.task.multi_loss import train as odc_train
+from src.task.nmt import train as nmt_train
 
 parser = argparse.ArgumentParser()
 
@@ -40,6 +41,11 @@ parser.add_argument("--shared_dir", type=str, default="/tmp",
 parser.add_argument("--predefined_config", type=str, default=None,
                     help="""Use predefined configuration.""")
 
+parser.add_argument('--display_loss_detail', action="store_true",
+                    help="Whether to display loss detail.")
+
+parser.add_argument("--task", type=str, choices=["nmt", "odc"], default="nmt")
+
 
 def run(**kwargs):
     args = parser.parse_args()
@@ -51,8 +57,12 @@ def run(**kwargs):
     auto_mkdir(args.log_path)
     auto_mkdir(args.saveto)
     auto_mkdir(args.valid_path)
-
-    train(args)
+    if args.task == 'nmt':
+        nmt_train(args)
+    elif args.task == 'odc':
+        odc_train(args)
+    else:
+        raise ValueError("not support task!")
 
 
 if __name__ == '__main__':

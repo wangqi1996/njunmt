@@ -196,11 +196,13 @@ class EncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, enc_input, slf_attn_mask=None, char_emb=None, enc_char_attn_mask=None, char_attn_cache=None):
-        context, _, _ = self.slf_attn(enc_input, mask=slf_attn_mask)
-        char_attn, _, _ = self.char_attn(context, char_emb, mask=enc_char_attn_mask,
+        char_attn, _, _ = self.char_attn(enc_input, char_emb, mask=enc_char_attn_mask,
                                          enc_attn_cache=char_attn_cache)
 
-        return self.pos_ffn(char_attn)
+        context, _, _ = self.slf_attn(char_attn, mask=slf_attn_mask)
+
+
+        return self.pos_ffn(context)
 
 
 class Encoder(nn.Module):
@@ -276,8 +278,7 @@ class DecoderLayer(nn.Module):
         if contain_char_attn:
             self.char_attn = EncoderAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
                                                    dim_per_head=dim_per_head, layer_norm_first=layer_norm_first)
-        else:
-            self.char_attn = None
+        self.contrain_char_attn = contain_char_attn
 
         self.pos_ffn = PositionwiseFeedForwardBlock(size=d_model, hidden_size=d_inner_hid,
                                                     layer_norm_first=layer_norm_first, activation=ffn_activation)
@@ -294,11 +295,14 @@ class DecoderLayer(nn.Module):
 
         query, _, self_attn_cache = self.slf_attn(dec_input, mask=slf_attn_mask, self_attn_cache=self_attn_cache)
 
-        attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
-                                                                  enc_attn_cache=enc_attn_cache, sample_K=sample_K,
-                                                                  seed=seed)
-        char_attn, char_weights, char_attn_cache = self.char_attn(attn_values, src_char_emb, mask=src_char_mask,
+        char_attn = query
+        if self.contrain_char_attn:
+            char_attn, char_weights, char_attn_cache = self.char_attn(attn_values, src_char_emb, mask=src_char_mask,
                                                                   enc_attn_cache=char_attn_cache)
+
+        # attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
+        #                                                           enc_attn_cache=enc_attn_cache, sample_K=sample_K,
+        #                                                           seed=seed)
 
         # output = self.pos_ffn(attn_values)
         output = self.pos_ffn(char_attn)
@@ -474,7 +478,7 @@ class Transformer_Char(NMTModel):
             d_word_vec=d_word_vec, d_model=d_model,
             d_inner_hid=d_inner_hid, dropout=dropout, dim_per_head=dim_per_head,
             padding_idx=padding_idx, layer_norm_first=layer_norm_first, positional_embedding=positional_embedding,
-            ffn_activation=ffn_activation)
+            ffn_activation=ffn_activation, )
 
         self.dropout = nn.Dropout(dropout)
 
@@ -502,7 +506,7 @@ class Transformer_Char(NMTModel):
     def forward(self, src_seq, tgt_seq, log_probs=True):
         # 为了不修改main函数, 暂时在这里获取src_seq的embedding
         char_seq = [self.char_vocab.sent2ids(self.bpe_vocab.ids2sent(src[1:-1])) for src in src_seq.cpu().tolist()]
-        from src.main import prepare_data
+        from src.task.nmt import prepare_data
         char_seq = prepare_data(char_seq, seqs_y=None, cuda=True)
 
         enc_output, enc_mask, char_emb, char_mask = self.encoder(src_seq, char_seq)
@@ -513,7 +517,7 @@ class Transformer_Char(NMTModel):
 
     def encode(self, src_seq):
         char_seq = [self.char_vocab.sent2ids(self.bpe_vocab.ids2sent(src[1:-1])) for src in src_seq.cpu().tolist()]
-        from src.main import prepare_data
+        from src.task.nmt import prepare_data
         char_seq = prepare_data(char_seq, seqs_y=None, cuda=True)
 
         ctx, ctx_mask, char_emb, char_mask = self.encoder(src_seq, char_seq)

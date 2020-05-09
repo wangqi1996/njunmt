@@ -12,10 +12,13 @@ data_configs:
       dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/zh.json"
       codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/zh.codes"
       max_n_words: -1
+      bpe_dropout: 0.1
     - type: "bpe"
       dict_path: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/vocab/en.json"
       max_n_words: -1
       codes: "/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/bpe/30K/codes/en.codes"
+      bpe_dropout: 0.1
+
   max_len:
     - 100
     - 100
@@ -32,6 +35,17 @@ model_configs:
   dropout: 0.1
   proj_share_weight: true
   label_smoothing: 0.1
+  char_vocab:
+    type: "char"
+    dict_path: "/home/user_data55/wangdq/code/njunmt_dist/nist/nist/vocab/zh.char.json"
+    max_n_words: -1
+  loss_configs:
+    - type: "nmt_criterion"
+      label_smoothing: 0.1
+      factor: 1
+    - type: "wordKD_criterion"
+      init_use_KD: false
+      factor: 1
 
 optimizer_configs:
   optimizer: "adam"
@@ -66,3 +80,15 @@ training_configs:
     sacrebleu_args: "--tokenize none -lc"
     postprocess: false
   early_stop_patience: 50
+  use_odc: true
+  teacher_choice: "best"  # best ma ave_best_k
+  teacher_model_path: ''
+  moving_average_method: "ema" # ema sma two_phase_ema none
+  moving_average_start_epoch: 0
+  teacher_patience: 1 # This value controls the tolerance that we start to use ODC when current model is inferior to the best checkpoint.
+  teacher_refresh_warmup: 1 # After how many epoches we start to use ODC.
+  num_kept_last_k_checkpoints: 3
+  num_kept_best_k_checkpoints: 3
+
+
+

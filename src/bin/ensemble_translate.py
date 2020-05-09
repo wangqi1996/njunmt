@@ -23,7 +23,7 @@
 import argparse
 import os
 
-from src.main import ensemble_translate
+from src.task.nmt import ensemble_translate
 from . import auto_mkdir
 
 parser = argparse.ArgumentParser()
@@ -34,7 +34,7 @@ parser.add_argument("--model_name", type=str,
 parser.add_argument("--source_path", type=str,
                     help="""Path to source file.""")
 
-parser.add_argument("--model_path", type=str, nargs="+",
+parser.add_argument("--model_path", type=str,
                     help="""Path to model files.""")
 
 parser.add_argument("--config_path", type=str,
@@ -65,7 +65,11 @@ parser.add_argument("--multi_gpu", action="store_true",
 
 parser.add_argument("--shared_dir", type=str, default=None,
                     help="""Shared directory across nodes. Default is '/tmp'""")
+parser.add_argument("--ref_path", type=str,
+                    help="""ref path""")
 
+parser.add_argument("--num_refs", type=int, default=1,
+                    help="""num_refs""")
 
 def run(**kwargs):
     args = parser.parse_args()

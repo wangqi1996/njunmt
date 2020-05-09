@@ -1,11 +1,12 @@
 import contextlib
 import copy
-import numpy as np
 import os
 import time
+from collections import OrderedDict
+
+import numpy as np
 import torch
 import torch.nn as nn
-from collections import OrderedDict
 
 from . import nest
 
@@ -57,6 +58,8 @@ class Constants:
 
     SEED = 314159
 
+    CURRENT_DEVICE = 'cuda'
+
     PAD = 0
     EOS = 1
     BOS = 2
@@ -64,6 +67,13 @@ class Constants:
 
 
 time_format = '%Y-%m-%d %H:%M:%S'
+
+
+def argsort(seq, reverse=False):
+    numbered_seq = [(i, e) for i, e in enumerate(seq)]
+    sorted_seq = sorted(numbered_seq, key=lambda p: p[1], reverse=reverse)
+
+    return [p[0] for p in sorted_seq]
 
 
 class Timer(object):
@@ -183,7 +193,6 @@ def should_trigger_by_steps(global_step,
     When to trigger bleu evaluation.
     """
     # Debug mode
-
     if debug:
         return True
 
@@ -227,6 +236,10 @@ class Saver(object):
         self.save_list = save_list
         self.num_max_keeping = num_max_keeping
 
+    @property
+    def num_saved(self):
+        return len(self.save_list)
+
     @staticmethod
     def savable(obj):
 
@@ -234,6 +247,10 @@ class Saver(object):
             return True
         else:
             return False
+
+    def get_all_ckpt_path(self):
+        """Get all the path of checkpoints contains by"""
+        return [os.path.join(self.save_dir, path) for path in self.save_list]
 
     def save(self, global_step, **kwargs):
 
@@ -274,6 +291,107 @@ class Saver(object):
                 else:
                     print("Loading {0}".format(name))
                     obj.load_state_dict(state_dict[name])
+
+    def clean_all_checkpoints(self):
+
+        # remove all the checkpoint files
+        for ckpt_path in self.get_all_ckpt_path():
+            try:
+                os.remove(ckpt_path)
+            except:
+                continue
+
+        # rest save list
+        self.save_list = []
+
+
+class LastKSaver(Saver):
+
+    def save(self, global_step, **kwargs):
+        if self.num_saved >= self.num_max_keeping:
+            return
+        super().save(global_step, **kwargs)
+
+
+class BestKSaver(Saver):
+    def __init__(self, save_prefix, num_max_keeping=1):
+        super().__init__(save_prefix, num_max_keeping)
+
+        if len(self.save_list) > 0:
+            self.save_names = [line.strip().split(",")[0] for line in self.save_list]
+            self.save_metrics = [float(line.strip().split(",")[1]) for line in self.save_list]
+        else:
+            self.save_names = []
+            self.save_metrics = []
+
+    @property
+    def min_save_metric(self):
+        if len(self.save_metrics) == 0:
+            return -1e-5
+        else:
+            return min(self.save_metrics)
+
+    def clean_all_checkpoints(self):
+        super().clean_all_checkpoints()
+        try:
+            os.remove(self.save_prefix)
+        except:
+            pass
+        # rest save list
+        self.save_names = []
+        self.save_metrics = []
+
+    def save(self, global_step, **kwargs):
+
+        metric = kwargs['metric']
+        # Less than minimum metric value, do not save
+        if metric < self.min_save_metric:
+            return
+
+        state_dict = dict()
+
+        for key, obj in kwargs.items():
+            if self.savable(obj):
+                state_dict[key] = obj.state_dict()
+
+        saveto_path = '{0}.{1}'.format(self.save_prefix, global_step)
+        torch.save(state_dict, saveto_path)
+
+        # self.save_list.append(os.path.basename(saveto_path))
+
+        if self.num_saved >= self.num_max_keeping:
+
+            # equals to minimum metric, keep the latest one
+            if metric == self.min_save_metric:
+                out_of_date_name = self.save_names[0]
+                new_save_names = [os.path.basename(saveto_path), ] + self.save_names[1:]
+                new_save_metrics = [metric, ] + self.save_metrics[1:]
+            else:
+                new_save_names = [os.path.basename(saveto_path), ] + self.save_names
+                new_save_metrics = [metric, ] + self.save_metrics
+
+                # keep best-k checkpoint
+                kept_indices = argsort(new_save_metrics)
+                out_of_date_name = new_save_names[kept_indices[0]]
+                new_save_names = [new_save_names[ii] for ii in kept_indices[1:]]
+                new_save_metrics = [new_save_metrics[ii] for ii in kept_indices[1:]]
+            if os.path.exists(os.path.join(self.save_dir, out_of_date_name)):
+                os.remove(os.path.join(self.save_dir, out_of_date_name))
+
+        else:
+            new_save_names = [os.path.basename(saveto_path), ] + self.save_names
+            new_save_metrics = [metric, ] + self.save_metrics
+            kept_indices = argsort(new_save_metrics)
+
+            new_save_names = [new_save_names[ii] for ii in kept_indices]
+            new_save_metrics = [new_save_metrics[ii] for ii in kept_indices]
+
+        self.save_names = new_save_names
+        self.save_metrics = new_save_metrics
+
+        with open(self.save_prefix, "w") as f:
+            for ii in range(len(self.save_names)):
+                f.write("{0},{1}\n".format(self.save_names[ii], self.save_metrics[ii]))
 
 
 @contextlib.contextmanager
@@ -339,6 +457,42 @@ class AverageMeter(Meter):
         return self.ave
 
 
+class AverageMeterDict(object):
+    """Compute and storage the list average of some value."""
+
+    def __init__(self, keys):
+        self.ave_meters = dict()
+        for key in keys:
+            self.ave_meters[key] = AverageMeter()
+
+    def update(self, value_dict, n):
+        for key, ave in self.ave_meters.items():
+            value = value_dict.get(key, 0)
+            ave.update(value, n)
+
+    @property
+    def value(self):
+        return {key: ave.value for key, ave in self.ave_meters.items()}
+
+    def state_dict(self):
+        state = dict()
+        for key, ave in self.ave_meters.items():
+            state[key] = ave.state_dict()
+        return state
+
+    def load_state_dict(self, state_dict):
+        for key, value in state_dict.items():
+            self.ave_meters[key].load_state_dict(value)
+
+    @property
+    def sum(self):
+        return {key: ave.sum for key, ave in self.ave_meters.items()}
+
+    def reset(self):
+        for _, value in self.ave_meters.items():
+            value.reset()
+
+
 class TimeMeter(Meter):
     """Compute and storage the average of some value per seconds."""
 
@@ -391,3 +545,4 @@ def register(name: str, registry: dict):
             return cls
 
     return register_cls
+

@@ -12,10 +12,12 @@ data_configs:
       max_n_words: -1
       dict_path: "/home/public_data/nmtdata/wmt14_en-de_data_selection/vocab.json"
       codes: "/home/public_data/nmtdata/wmt14_en-de_data_selection/bpe.32000"
+      bpe_dropout: 0.1
     - type: "bpe"
       dict_path: "/home/public_data/nmtdata/wmt14_en-de_data_selection/vocab.json"
       codes: "/home/public_data/nmtdata/wmt14_en-de_data_selection/bpe.32000"
       max_n_words: -1
+      bpe_dropout: 0.1
   max_len:
     - -1
     - -1
@@ -48,9 +50,9 @@ training_configs:
   max_epochs: 50
   shuffle: true
   use_bucket: true
-  batch_size: 2048
+  batch_size: 2500
   batching_key: "tokens"
-  update_cycle: 4
+  update_cycle: 10
   valid_batch_size: 20
   disp_freq: 500
   save_freq: 500
