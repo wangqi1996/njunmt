@@ -174,7 +174,7 @@ class TextLineDataset(Dataset):
         :type line: str
         """
         line = self._vocab.sent2ids(line, is_train=self.is_train_data)
-
+        line = line[:self._max_len]
         if 0 < self._max_len < len(line):
             return None
 

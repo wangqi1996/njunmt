@@ -3,7 +3,7 @@ import argparse
 from src.bin import auto_mkdir
 from src.task.multi_loss import train as odc_train
 from src.task.nmt import train as nmt_train
-
+from src.task.pretrain import train as pretrain
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--model_name', type=str,
@@ -44,7 +44,7 @@ parser.add_argument("--predefined_config", type=str, default=None,
 parser.add_argument('--display_loss_detail', action="store_true",
                     help="Whether to display loss detail.")
 
-parser.add_argument("--task", type=str, choices=["nmt", "odc"], default="nmt")
+parser.add_argument("--task", type=str, choices=["nmt", "odc", "mlm"], default="nmt")
 
 
 def run(**kwargs):
@@ -61,6 +61,8 @@ def run(**kwargs):
         nmt_train(args)
     elif args.task == 'odc':
         odc_train(args)
+    elif args.task == 'mlm':
+        pretrain(args)
     else:
         raise ValueError("not support task!")
 

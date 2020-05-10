@@ -452,7 +452,6 @@ def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None)
         INFO("Pretrained model loaded.")
 
 
-
 def train(flags):
     """
     flags:

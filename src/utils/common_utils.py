@@ -60,6 +60,8 @@ class Constants:
 
     CURRENT_DEVICE = 'cuda'
 
+    MASK_TOKENS = '[MASK]'
+
     PAD = 0
     EOS = 1
     BOS = 2
@@ -545,4 +547,3 @@ def register(name: str, registry: dict):
             return cls
 
     return register_cls
-

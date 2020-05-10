@@ -40,6 +40,7 @@ class Vocabulary(object):
                 for i, line in enumerate(f):
                     ww = line.strip().split()[0]
                     dictionary[ww] = (i, 0)
+            dictionary['[MASK]'] = (len(dictionary), 0)
 
         if type == "word":
             return WordVocabulary(dictionary=dictionary, max_n_words=max_n_words)
