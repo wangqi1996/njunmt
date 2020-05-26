@@ -119,7 +119,7 @@ def loss_evaluation(model, critic, valid_iterator, rank=0, world_size=1):
         total_tokens = dist.all_reduce_py(total_tokens)
         correct_tokens = dist.all_reduce_py(correct_tokens)
 
-    return float(sum_loss / n_sents), total_tokens / correct_tokens
+    return float(sum_loss / n_sents), correct_tokens / total_tokens
 
 
 def train(flags):
@@ -338,7 +338,7 @@ def train(flags):
     bad_count = model_collections.get_collection("bad_count", [0])[-1]
     oom_count = model_collections.get_collection("oom_count", [0])[-1]
     is_early_stop = model_collections.get_collection("is_early_stop", [False, ])[-1]
-
+    best_valid_accuracy = model_collections.get_collection("best_valid_accuracy", [0])[-1]
     train_loss_meter = AverageMeter()
     sent_per_sec_meter = TimeMeter()
     tok_per_sec_meter = TimeMeter()
@@ -502,6 +502,8 @@ def train(flags):
                     scheduler.step(metric=valid_loss)
 
                 model_collections.add_to_collection("history_losses", valid_loss)
+                best_valid_accuracy = max(best_valid_accuracy, accuracy)
+                model_collections.add_to_collection("best_valid_accuracy", best_valid_accuracy)
 
                 min_history_loss = np.array(model_collections.get_collection("history_losses")).min()
                 best_valid_loss = min_history_loss
@@ -510,7 +512,7 @@ def train(flags):
                     summary_writer.add_scalar("best_loss", min_history_loss, global_step=uidx)
                     summary_writer.add_scalar("accuracy", accuracy, global_step=uidx)
 
-                if best_valid_loss == valid_loss:
+                if best_valid_accuracy == accuracy:
                     if rank == 0:
                         # 1. save the best model
                         torch.save(nmt_model.state_dict(), best_model_prefix + ".final")
@@ -530,6 +532,10 @@ def train(flags):
                     is_early_stop = True
                     WARN("Early Stop!")
                     exit(0)
+
+                INFO("{0} Loss: {1:.2f} accuracy: {2:.2f} lrate: {3:6f} patience: {4}".format(
+                    uidx, valid_loss, accuracy, lrate, bad_count
+                ))
 
             # ================================================================================== #
             # Saving checkpoints

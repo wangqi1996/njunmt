@@ -4,6 +4,7 @@ from src.bin import auto_mkdir
 from src.task.multi_loss import train as odc_train
 from src.task.nmt import train as nmt_train
 from src.task.pretrain import train as pretrain
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--model_name', type=str,
@@ -45,6 +46,12 @@ parser.add_argument('--display_loss_detail', action="store_true",
                     help="Whether to display loss detail.")
 
 parser.add_argument("--task", type=str, choices=["nmt", "odc", "mlm"], default="nmt")
+
+# encoder、decoder、generator
+parser.add_argument("--pretrain_exclude_prefix", type=str, default=None, help="split by ;")
+
+# encoder_embedding;encoder;decoder_embedding;decoder;encoder_k(encoder_2)
+parser.add_argument("--froze_config", type=str, default=None, help="split by ;")
 
 
 def run(**kwargs):

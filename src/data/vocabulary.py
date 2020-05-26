@@ -17,7 +17,6 @@ class Vocabulary(object):
 
     def __init__(self, dictionary: dict, max_n_words=-1):
         super().__init__()
-
         self._token2id_feq = RESERVED_TOKENS_DICT.copy()
 
         n_reserved_tokens = len(self._token2id_feq)
@@ -29,7 +28,7 @@ class Vocabulary(object):
         self.max_n_words = len(self._token2id_feq) if max_n_words == -1 else max_n_words
 
     @staticmethod
-    def build_from_file(type: str, dict_path: str, max_n_words: int, **kwargs) -> 'Vocabulary':
+    def build_from_file(type: str, dict_path: str, max_n_words: int, add_mask=False, **kwargs) -> 'Vocabulary':
 
         if dict_path.endswith(".json"):
             with open(dict_path) as f:
@@ -40,7 +39,8 @@ class Vocabulary(object):
                 for i, line in enumerate(f):
                     ww = line.strip().split()[0]
                     dictionary[ww] = (i, 0)
-            dictionary['[MASK]'] = (len(dictionary), 0)
+            if add_mask:
+                dictionary['[MASK]'] = (len(dictionary), 0)
 
         if type == "word":
             return WordVocabulary(dictionary=dictionary, max_n_words=max_n_words)
@@ -115,7 +115,10 @@ class BPEVocabulary(Vocabulary):
 
     def __init__(self, dictionary: dict, codes: str, max_n_words=-1, bpe_dropout=0.0):
         super().__init__(dictionary=dictionary, max_n_words=max_n_words)
-        self.bpe = Bpe(codes=codes)
+        if codes:
+            self.bpe = Bpe(codes=codes)
+        else:
+            self.bpe = None
         self.bpe_dropout = bpe_dropout
 
     def tokenize(self, sent: str, is_train=False) -> List[str]:

@@ -1,8 +1,8 @@
 import argparse
 import os
 
-from src.main import translate
 from src.bin import auto_mkdir
+from src.task.nmt import translate
 
 parser = argparse.ArgumentParser()
 

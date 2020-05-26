@@ -1,21 +1,23 @@
 data_configs:
-  lang_pair: "uy-zh"
+  lang_pair: "zh-en"
   train_data:
-    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/train.uy"
-    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/train.zh"
+    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/mlm.src"
+    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/mlm.trg"
   valid_data:
-    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/dev.uy"
-    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/dev.zh"
-  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/dev.zh"
+    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/test.src.0"
+    - "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/test.trg.0"
+  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/test.trg.0"
   vocabularies:
-    - type: "bpe"
-      dict_path: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/uy.dict"
-      codes: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/uy.codes"
-      max_n_words: -1
-    - type: "bpe"
+    - type: "word"
       dict_path: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/zh.dict"
-      max_n_words: -1
       codes: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/zh.codes"
+      max_n_words: -1
+      add_mask: true
+    - type: "word"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/zh.dict"
+      codes: "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/zh.codes"
+      max_n_words: -1
+      add_mask: true
   max_len:
     - 100
     - 100
@@ -23,7 +25,7 @@ data_configs:
   eval_at_char_level: false
 
 model_configs:
-  model: Transformer
+  model: Bert
   n_layers: 6
   n_head: 8
   d_word_vec: 512
@@ -31,7 +33,7 @@ model_configs:
   d_inner_hid: 2048
   dropout: 0.1
   proj_share_weight: true
-  label_smoothing: 0.1
+  label_smoothing: 0.0  # use NLL loss
 
 optimizer_configs:
   optimizer: "adam"
@@ -48,7 +50,7 @@ training_configs:
   max_epochs: 50
   shuffle: true
   use_bucket: true
-  batch_size: 2048
+  batch_size: 5120
   batching_key: "tokens"
   update_cycle: 1
   valid_batch_size: 20
@@ -56,7 +58,7 @@ training_configs:
   save_freq: 300
   num_kept_checkpoints: 1
   loss_valid_freq: 300
-  bleu_valid_freq: 300
+  bleu_valid_freq: -1 # not compute blue
   bleu_valid_batch_size: 5
   bleu_valid_warmup: 1
   bleu_valid_configs:

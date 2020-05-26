@@ -2,7 +2,6 @@ import itertools
 import os
 import random
 import time
-from contextlib import ExitStack
 
 import numpy as np
 import torch
@@ -408,6 +407,31 @@ def bleu_evaluation(uidx,
     return bleu_v
 
 
+def froze_params(nmt_model, froze_config):
+    if not froze_config:
+        return
+    froze_list = froze_config.split(";")
+    froze_name = []
+    for froze in froze_list:
+        if froze == "encoder_embedding":
+            froze_name.extend(["encoder.embeddings", ])
+        elif froze == "encoder":
+            froze_name.extend(["encoder."])
+        elif froze == "decoder_embedding":
+            froze_name.extend(["decoder.embeddings"])
+        elif froze == "decoder":
+            froze_name.extend(["decoder."])
+        else:
+            raise NotImplementedError
+    INFO("forze parameters: " + ' '.join(froze_name))
+    for name, param in nmt_model.named_parameters():
+        for _froze in froze_name:
+            if name.startswith(_froze):
+                param.requires_grad = False
+                break
+
+
+
 def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None):
     """
     Args:
@@ -424,6 +448,8 @@ def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None)
     """
     if exclude_prefix is None:
         exclude_prefix = []
+    else:
+        exclude_prefix = exclude_prefix.split(";")
     if pretrain_path is not None:
         INFO("Loading pretrained model from {}".format(pretrain_path))
 
@@ -612,7 +638,10 @@ def train(flags):
         critic = critic.cuda()
 
     # 3. Load pretrained model if needed
-    load_pretrained_model(nmt_model, flags.pretrain_path, exclude_prefix=None, device=Constants.CURRENT_DEVICE)
+    load_pretrained_model(nmt_model, flags.pretrain_path, exclude_prefix=flags.pretrain_exclude_prefix,
+                          device=Constants.CURRENT_DEVICE)
+    # froze_parameters
+    froze_params(nmt_model, flags.froze_config)
 
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
@@ -955,7 +984,7 @@ def translate(flags):
     timer = Timer()
     # ================================================================================== #
     # Load Data
-
+    INFO("postprocess" + str(training_configs["bleu_valid_configs"]['postprocess']))
     INFO('Loading data...')
     timer.tic()
 
@@ -1037,6 +1066,7 @@ def translate(flags):
 
         # compute bleu score
         if flags.ref_path is not None:
+            INFO("postprocess" + str(training_configs["bleu_valid_configs"]['postprocess']))
             bleu_scorer = SacreBLEUScorer(reference_path=flags.ref_path,
                                           num_refs=flags.num_refs,
                                           lang_pair=data_configs["lang_pair"],
@@ -1109,59 +1139,59 @@ def ensemble_translate(flags):
 
     nmt_models = []
 
-    # model_path = flags.model_path.split(',')
-    #
-    # for ii in range(len(model_path)):
-    #
-    #     nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
-    #                             n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
-    #                             **model_configs)
-    #     nmt_model.eval()
-    #     INFO('Done. Elapsed time {0}'.format(timer.toc()))
-    #
-    #     INFO('Reloading model parameters...')
-    #     timer.tic()
-    #
-    #     params = load_model_parameters(model_path[ii], map_location="cpu")
-    #
-    #     nmt_model.load_state_dict(params, strict=False)
-    #
-    #     if Constants.USE_GPU:
-    #         nmt_model.cuda()
-    #
-    #     nmt_models.append(nmt_model)
-    #
-    # INFO('Done. Elapsed time {0}'.format(timer.toc()))
-    #
-    # INFO('Begin...')
-    # timer.tic()
+    model_path = flags.model_path.split(',')
 
-    # translations_in_all_beams = ensemble_inference(
-    #     valid_iterator=valid_iterator,
-    #     models=nmt_models,
-    #     vocab_tgt=vocab_tgt,
-    #     batch_size=flags.batch_size,
-    #     max_steps=flags.max_steps,
-    #     beam_size=flags.beam_size,
-    #     alpha=flags.alpha,
-    #     rank=rank,
-    #     world_size=world_size,
-    #     using_numbering_iterator=True
-    # )
+    for ii in range(len(model_path)):
 
-    # acc_time = timer.toc(return_seconds=True)
-    # acc_num_tokens = sum([len(line.strip().split()) for line in translations_in_all_beams[0]])
+        nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
+                                n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
+                                **model_configs)
+        nmt_model.eval()
+        INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
-    # INFO('Done. Speed: {0:.2f} words/sec'.format(acc_num_tokens / acc_time))
+        INFO('Reloading model parameters...')
+        timer.tic()
+
+        params = load_model_parameters(model_path[ii], map_location="cpu")
+
+        nmt_model.load_state_dict(params, strict=False)
+
+        if Constants.USE_GPU:
+            nmt_model.cuda()
+
+        nmt_models.append(nmt_model)
+
+    INFO('Done. Elapsed time {0}'.format(timer.toc()))
+
+    INFO('Begin...')
+    timer.tic()
+
+    translations_in_all_beams = ensemble_inference(
+        valid_iterator=valid_iterator,
+        models=nmt_models,
+        vocab_tgt=vocab_tgt,
+        batch_size=flags.batch_size,
+        max_steps=flags.max_steps,
+        beam_size=flags.beam_size,
+        alpha=flags.alpha,
+        rank=rank,
+        world_size=world_size,
+        using_numbering_iterator=True
+    )
+
+    acc_time = timer.toc(return_seconds=True)
+    acc_num_tokens = sum([len(line.strip().split()) for line in translations_in_all_beams[0]])
+
+    INFO('Done. Speed: {0:.2f} words/sec'.format(acc_num_tokens / acc_time))
 
     if rank == 0:
         keep_n = flags.beam_size if flags.keep_n <= 0 else min(flags.beam_size, flags.keep_n)
         outputs = ['%s.%d' % (flags.saveto, i) for i in range(keep_n)]
 
-        # with batch_open(outputs, 'w') as handles:
-        #     for ii in range(keep_n):
-        #         for trans in translations_in_all_beams[ii]:
-        #             handles[ii].write('%s\n' % trans)
+        with batch_open(outputs, 'w') as handles:
+            for ii in range(keep_n):
+                for trans in translations_in_all_beams[ii]:
+                    handles[ii].write('%s\n' % trans)
 
         # compute bleu score
         if flags.ref_path is not None:
@@ -1176,46 +1206,3 @@ def ensemble_translate(flags):
                 with open(outputs[i]) as f:
                     bleu_v = bleu_scorer.corpus_bleu(f)
                     print(str(i) + " bleu: " + str(bleu_v))
-
-
-def rerank_max(beam_size, outputs, bleu_scorer):
-    # 计算每一句话翻译得分，选取最高的计算\
-
-    max_index_dict = dict()
-    with open(outputs + "final", 'w') as f:
-        with ExitStack() as stack:
-            handles = [stack.enter_context(open(outputs + str(index))) for index in range(beam_size)]
-            for index, contents in enumerate(zip(*handles)):
-                max_score, max_index = 0, -1
-                for beam, content in zip(range(beam_size), contents):
-                    score = bleu_scorer.corpus_single_bleu(content, index)
-                    if score > max_score:
-                        max_score = score
-                        max_index = beam
-                max_content = contents[max_index]
-                max_index_dict.setdefault(max_index, 0)
-                max_index_dict.update({max_index: max_index_dict[max_index] + 1})
-                f.write(max_content)
-
-    with open(outputs + "final", 'r') as f:
-        score = bleu_scorer.corpus_bleu(f)
-
-    print(score)
-    print(max_index_dict)
-
-    with open(outputs + "0", 'r') as f:
-        score = bleu_scorer.corpus_bleu(f)
-
-    print(score)
-#
-#
-# if __name__ == '__main__':
-#
-#     bleu_scorer = SacreBLEUScorer(reference_path="/home/user_data/weihr/NMT_DATA_PY3/NIST-ZH-EN/test/mt04.ref",
-#                                   num_refs=4,
-#                                   lang_pair="zh-en",
-#                                   sacrebleu_args="--tokenize none -lc",
-#                                   postprocess=False
-#                                   )
-#
-#     rerank_max(5, '/home/user_data55/wangdq/code/njunmt/log/zh2en/outputmt04.', bleu_scorer)

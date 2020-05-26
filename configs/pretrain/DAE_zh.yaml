@@ -12,10 +12,12 @@ data_configs:
       dict_path: "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh.dict"
       codes: "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh.codes"
       max_n_words: -1
+      add_mask: true
     - type: "word"
       dict_path: "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh.dict"
       max_n_words: -1
       codes: "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh.codes"
+      add_mask: true
   max_len:
     - 100
     - 100

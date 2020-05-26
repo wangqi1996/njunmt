@@ -2,9 +2,12 @@
 import copy
 import os
 import random
+import re
 from contextlib import ExitStack
 
 from xml.dom.minidom import parse
+
+from sacremoses import MosesDetokenizer, MosesDetruecaser
 
 
 def get_sentence(file):
@@ -60,7 +63,7 @@ def process_dev_as_text(zh_file_name):
                     line, str(index), str(text_index))
                 new_line = re.findall(seg_pattern, line)
                 contents.append(new_line[0] + '\n')
-    zh_fn = os.path.join(os.path.dirname(zh_file_name), 'dev.en')
+    zh_fn = os.path.join(os.path.dirname(zh_file_name), 'dev.uy.raw')
     with open(zh_fn, 'w') as f:
         f.writelines(contents)
 
@@ -121,12 +124,12 @@ def process_mono():
                 fw.writelines(contents)
 
 
-def reverse_text():
+def reverse_text(filename="/home/user_data55/wangdq/data/ccmt/zh-en/parallel/train.en"):
     lines = 0
     contents = []
-    filename = "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/train.en"
+    trg_reverse = filename + ".reverse"
     with open(filename, 'r') as f:
-        with open(filename + '.reverse', 'w') as f2:
+        with open(trg_reverse, 'w') as f2:
             for line in f:
                 tokens = line.split()
                 tokens.reverse()
@@ -138,6 +141,7 @@ def reverse_text():
                     lines = 0
             if len(contents) > 0:
                 f2.writelines(contents)
+    return trg_reverse
 
 
 def split_test(src_filename, trg_filename, size=1000, times=3):
@@ -278,11 +282,196 @@ def DAE(filename, max_length=150):
         print("end!!")
 
 
-# if __name__ == '__main__':
-    #     count()
-    # mlm_filename = "/home/user_data55/wangdq/data/ccmt/zh-en/monolingual/xmu.bpe"
-    # # mlm(mlm_filename)
-    # src = "/home/user_data55/wangdq/data/ccmt/zh-en/monolingual/DAE/dae.src"
-    # trg = "/home/user_data55/wangdq/data/ccmt/zh-en/monolingual/DAE/dae.trg"
-    # split_test(src, trg, 1000, 3)
-    # # DAE(mlm_filename, 150)
+def process(filename1, filename2):
+    def strQ2B(ustring):
+        ss = []
+        for s in ustring:
+            rstring = ""
+            for uchar in s:
+                inside_code = ord(uchar)
+                if inside_code == 12288:  # 全角空格直接转换
+                    inside_code = 32
+                elif (inside_code >= 65281 and inside_code <= 65374):  # 全角字符（除空格）根据关系转化
+                    inside_code -= 65248
+                rstring += chr(inside_code)
+            ss.append(rstring)
+        return ''.join(ss)
+
+    l1_list = []
+    l2_list = []
+    raw1 = {}
+    raw2 = {}
+    amp = r"&amp;"
+    lt = r"&lt;"
+    gt = r"&gt;"
+    quot = r"&quot;"
+    apos = r"&apos;"
+    delete = 0
+    re_space = re.compile(r"(?<![a-zA-Z])\s(?![a-zA-Z])", flags=re.UNICODE)
+    re_final_comma = re.compile("\.$")
+    pattern_list = {amp: "&", lt: ">", gt: "<", quot: "\"", apos: "\'"}
+    with open(filename1 + ".new", 'w') as f1_w, open(filename2 + ".new", 'w') as f2_w:
+        with open(filename1, 'r') as f1, open(filename2, 'r') as f2:
+            for index, (l1, l2) in enumerate(zip(f1, f2)):
+                # 重复句的删除
+                h1 = hash(l1)
+                h2 = hash(l2)
+                if h1 in raw1 and h2 in raw2:
+                    if raw1[h1] == raw2[h2]:
+                        # print(raw1[h1])
+                        print(raw2[h2])
+                        print(index)
+                        # print(l1)
+                        # print(l2)
+                        # print(h1)
+                        # print(h2)
+                        delete += 1
+                        continue
+                raw1[h1] = index
+                raw2[h2] = index
+                # 语种检测
+                # from langdetect import detect
+                # if detect(l1) != 'zh-cn' and detect(l2) != 'en':
+                #     print(l1)
+                #     print(l2)
+                #     continue
+                l1 = l1.strip().strip('\n').strip()
+                l2 = l2.strip().strip('\n').strip()
+                # 全角转半角
+                l1 = strQ2B(l1)
+                l2 = strQ2B(l2)
+                # 转义字符处理
+                for pattern, replace in pattern_list.items():
+                    l1 = l1.replace(pattern, replace)
+                    l2 = l2.replace(pattern, replace)
+                # # 大小写转换
+                # l1 = l1.lower()
+                # l2 = l2.lower()
+                # wmt的处理
+                l1 = re_space.sub("", l1)
+                l1 = l1.replace(",", u"\uFF0C")
+                l1 = re_final_comma.sub(u"\u3002", l1)
+
+
+                l1_list.append(l1.strip() + '\n')
+                l2_list.append(l2.strip() + '\n')
+
+                if len(l1_list) > 300:
+                    f1_w.writelines(l1_list)
+                    f2_w.writelines(l2_list)
+                    l1_list = []
+                    l2_list = []
+
+        if len(l1_list) > 0:
+            f1_w.writelines(l1_list)
+            f2_w.writelines(l2_list)
+    print("delete: ", delete)
+
+
+def tttt():
+    filename = "/home/user_data55/wangdq/code/njunmt/log/uy2zh/outputmt01.0"
+    new_filename = "/home/user_data55/wangdq/code/njunmt/log/uy2zh/outputmt01.00"
+    c = []
+    detokenizer = MosesDetokenizer(lang="zh")
+    detrucaser = MosesDetruecaser()
+    with open(filename, 'r') as f1, open(new_filename, 'w') as f2:
+        for l in f1:
+            # t = l.strip().split(' ')
+            # c.append(''.join(t))
+            l = detrucaser.detruecase(l, return_str=False)
+            l = detokenizer.detokenize(l, return_str=True)
+            c.append(l + '\n')
+            if len(c) > 300:
+                f2.writelines(c)
+                c = []
+
+        if len(c) > 0:
+            f2.writelines(c)
+
+def count_length(filename1, filename2):
+    len1 = {}
+    _len1 = 0
+    len2 = {}
+    _len2 = 0
+    count = 0
+    l = {}
+
+    with open(filename1, 'r') as f1, open(filename2, 'r') as f2:
+        for l1, l2 in zip(f1, f2):
+            ll1 = len(l2.split(' '))
+            ll2 = len(l1.split(' '))
+            # _len1 += ll1
+            # _len2 += ll2
+            # len1.setdefault(int(ll1/10), 0)
+            # len1[int(ll1/10)] += 1
+            # len2.setdefault(int(ll2/10), 0)
+            # len2[int(ll2/10)] += 1
+            count += 1
+            l.setdefault(int(ll1 / ll2), 0)
+            l[int(ll1 / ll2)] += 1
+    print(len1)
+    print(len2)
+    print(count)
+    print(_len1)
+    print(_len2)
+    print(_len1 / count)
+    print(_len2 / count)
+    print(l)
+
+
+def cut_by_length(f1, f2, len1=100, len2=100, ld1=3, ld2=6):
+    l1_list = []
+    l2_list = []
+    delete = 0
+    delete2 = 0
+    with open(f1 + ".new", 'w') as f1_w, open(f2 + ".new", 'w') as f2_w:
+        with open(f1, 'r') as f1, open(f2, 'r') as f2:
+            for l1, l2 in zip(f1, f2):
+                l1_len = len(l1.split(" "))
+                l2_len = len(l2.split(" "))
+
+                if l1_len > len1 or  l2_len > len2:
+                    delete += 1
+                    continue
+                if l1_len/l2_len > ld1 or l2_len/l1_len > ld2:
+                    delete2 += 1
+                    continue
+
+                l1_list.append(l1)
+                l2_list.append(l2)
+
+                if len(l1_list) > 100:
+                    f1_w.writelines(l1_list)
+                    f2_w.writelines(l2_list)
+                    l1_list = []
+                    l2_list = []
+
+            if len(l1_list) > 0:
+                f1_w.writelines(l1_list)
+                f2_w.writelines(l2_list)
+    print(delete)
+    print(delete2)
+
+
+if __name__ == '__main__':
+    tttt()
+    # f1 = "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh.token"
+    # f2 = "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/en.token"
+    #
+    # cut_by_length(f1, f2)
+    # process_dev_as_text("/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/ref")
+    # process("/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh","/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy", )
+    # count_length(f1, f2)
+    # cut_by_length(f1, f2, 110, 90)
+    # count()
+
+# pretrain
+# mlm_filename = "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/monolingual.token.bpe"
+#     mlm(mlm_filename)
+#     src = "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/mlm.src"
+#     trg = "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/mlm.trg"
+# src = "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/DAE/dae.src"
+# trg = "/home/user_data55/wangdq/data/ccmt/processed-uy-zh/monolingual/DAE/dae.trg"
+# split_test(src, trg, 1000, 3)
+# DAE(mlm_filename, 150)
+# process_dev_as_text("/home/user_data55/wangdq/data/ccmt/uy-zh/CCMT2019_UC_test_src.xml")

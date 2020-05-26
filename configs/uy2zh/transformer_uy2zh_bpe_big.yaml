@@ -1,0 +1,69 @@
+data_configs:
+  lang_pair: "uy-zh"
+  train_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.txt"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.txt"
+  valid_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh"
+  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh.raw"
+  vocabularies:
+    - type: "bpe"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.vocab"
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.code"
+      max_n_words: -1
+    - type: "bpe"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.vocab"
+      max_n_words: -1
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.code"
+  max_len:
+    - 100
+    - 100
+  num_refs: 1
+  eval_at_char_level: false
+
+model_configs:
+  model: Transformer
+  n_layers: 6
+  n_head: 16
+  d_word_vec: 1024
+  d_model: 1024
+  d_inner_hid: 4096
+  dropout: 0.3
+  proj_share_weight: true
+  label_smoothing: 0.1
+  ffn_activation: "gelu"
+
+optimizer_configs:
+  optimizer: "adam"
+  learning_rate: 0.1
+  grad_clip: -1.0
+  optimizer_params: ~
+  schedule_method: noam
+  scheduler_configs:
+    d_model: 512
+    warmup_steps: 8000
+
+training_configs:
+  seed: 1234
+  max_epochs: 100
+  shuffle: true
+  use_bucket: true
+  batch_size: 4096
+  batching_key: "tokens"
+  update_cycle: 1
+  valid_batch_size: 20
+  disp_freq: 150
+  save_freq: 150
+  num_kept_checkpoints: 1
+  loss_valid_freq: 150
+  bleu_valid_freq: 150
+  bleu_valid_batch_size: 5
+  bleu_valid_warmup: 1
+  bleu_valid_configs:
+    max_steps: 150
+    beam_size: 5
+    alpha: 0.0
+    sacrebleu_args: "--tokenize zh"
+    postprocess: false
+  early_stop_patience: 50
