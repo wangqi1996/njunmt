@@ -29,7 +29,7 @@ model_configs:
   d_word_vec: 512
   d_model: 512
   d_inner_hid: 2048
-  dropout: 0.4
+  dropout: 0.2
   proj_share_weight: true
   label_smoothing: 0.1
   ffn_activation: "gelu"
@@ -63,7 +63,7 @@ training_configs:
   bleu_valid_configs:
     max_steps: 150
     beam_size: 5
-    alpha: 0.0
+    alpha: 0.1
     sacrebleu_args: "--tokenize zh"
     postprocess: false
   early_stop_patience: 30

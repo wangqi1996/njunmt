@@ -25,11 +25,11 @@ data_configs:
 model_configs:
   model: Transformer
   n_layers: 6
-  n_head: 8
-  d_word_vec: 512
-  d_model: 512
-  d_inner_hid: 2048
-  dropout: 0.4
+  n_head: 16
+  d_word_vec: 1024
+  d_model: 1024
+  d_inner_hid: 4096
+  dropout: 0.1
   proj_share_weight: true
   label_smoothing: 0.1
   ffn_activation: "gelu"

@@ -138,7 +138,7 @@ class SelfAttentionBlock(Block):
         super().__init__(model_dim, dropout=dropout, layer_norm_first=layer_norm_firs)
 
         self.transform_layer = MultiHeadedAttention(model_dim=model_dim, head_count=head_count,
-                                                    dim_per_head=dim_per_head, dropout=attn_dropout)
+                                                    dim_per_head=dim_per_head, dropout=dropout)
 
     def _transform(self, x, mask=None, self_attn_cache=None):
         return self.transform_layer(x, x, x, mask=mask, self_attn_cache=self_attn_cache)
@@ -150,7 +150,7 @@ class EncoderAttentionBlock(Block):
         super().__init__(model_dim, dropout=dropout, layer_norm_first=layer_norm_first)
 
         self.transform_layer = MultiHeadedAttention(model_dim=model_dim, head_count=head_count,
-                                                    dim_per_head=dim_per_head, dropout=attn_dropout)
+                                                    dim_per_head=dim_per_head, dropout=dropout)
 
     def _transform(self, dec_hidden, context, mask=None, enc_attn_cache=None, sample_K=0, seed=0):
         return self.transform_layer(context, context, dec_hidden, mask=mask, enc_attn_cache=enc_attn_cache,
@@ -250,7 +250,7 @@ class DecoderLayer(nn.Module):
         self.ctx_attn = EncoderAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
                                               dim_per_head=dim_per_head, layer_norm_first=layer_norm_first)
 
-        self.pos_ffn = PositionwiseFeedForwardBlock(size=d_model, hidden_size=d_inner_hid,
+        self.pos_ffn = PositionwiseFeedForwardBlock(size=d_model, hidden_size=d_inner_hid, dropout=dropout,
                                                     layer_norm_first=layer_norm_first, activation=ffn_activation)
 
         self.dropout = nn.Dropout(dropout)

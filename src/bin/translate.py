@@ -18,7 +18,7 @@ parser.add_argument("--model_path", type=str,
 parser.add_argument("--config_path", type=str,
                     help="""Path to config file.""")
 
-parser.add_argument("--batch_size", type=int, default=5,
+parser.add_argument("--batch_size", type=int, default=20,
                     help="""Batch size of beam search.""")
 
 parser.add_argument("--beam_size", type=int, default=5,

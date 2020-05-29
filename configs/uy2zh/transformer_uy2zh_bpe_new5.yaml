@@ -29,7 +29,7 @@ model_configs:
   d_word_vec: 512
   d_model: 512
   d_inner_hid: 2048
-  dropout: 0.4
+  dropout: 0.5
   proj_share_weight: true
   label_smoothing: 0.1
   ffn_activation: "gelu"

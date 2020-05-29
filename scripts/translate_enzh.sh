@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 export CUDA_VISIBLE_DEVICES=$1
-export SRC="uy"
+export SRC="en"
 export TGT="zh"
 export LAN="${SRC}2${TGT}"
-export CON="configs/uy2zh/transformer_uy2zh_bpe_new4.yaml"
-export SAVETODIR="/home/user_data55/wangdq/data/ccmt/uy-zh/output/"
+export CON="configs/en2zh/transformer_en2zh_bpe_new.yaml"
+export SAVETODIR="/home/user_data55/wangdq/data/ccmt/zh-en/output/"
 mkdir -p $SAVETODIR
 
 #python -m src.bin.translate \
@@ -21,12 +21,10 @@ mkdir -p $SAVETODIR
 
 python -m src.bin.translate \
     --model_name "transformer" \
-    --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token" \
-    --ref_path  "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh"  \
-    --model_path "/home/user_data55/wangdq/code/njunmt_dist/save/uy2zh/uy2zh_base_d4/transformer.best.final" \
+    --source_path "/home/user_data55/wangdq/data/ccmt/zh-en/test/en2zh/test.en.token" \
+    --model_path "/home/wangdq/save/en2zh/base/transformer.best.final" \
     --config_path "${CON}" \
     --batch_size 20 \
     --beam_size 5 \
-    --alpha 1.0 \
-    --saveto "${SAVETODIR}/test.out" \
-    --use_gpu  \
+    --saveto "${SAVETODIR}/en2zh.out" \
+    --use_gpu

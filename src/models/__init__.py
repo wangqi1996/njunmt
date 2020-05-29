@@ -25,7 +25,8 @@ MODEL_CLS = {
     "Transformer": Transformer,
     "DL4MT": DL4MT,
     "Transformer_Char": Transformer_Char,
-    "Bert": Bert
+    "Bert": Bert,
+    "LM": LM
 }
 
 DEFAULT_CONFIGS = {

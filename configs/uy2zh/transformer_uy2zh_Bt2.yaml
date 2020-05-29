@@ -1,21 +1,21 @@
 data_configs:
   lang_pair: "uy-zh"
   train_data:
-    - "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.token"
-    - "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/uy.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/zh.token"
   valid_data:
     - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token"
     - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh.token"
   bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh"
   vocabularies:
     - type: "bpe"
-      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.vocab"
-      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.code"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/uy.vocab"
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/uy.code"
       max_n_words: -1
     - type: "bpe"
-      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.vocab"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/zh.vocab"
       max_n_words: -1
-      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.code"
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/monolingual/data/zh.code"
   max_len:
     - 100
     - 100
@@ -29,7 +29,7 @@ model_configs:
   d_word_vec: 512
   d_model: 512
   d_inner_hid: 2048
-  dropout: 0.4
+  dropout: 0.3
   proj_share_weight: true
   label_smoothing: 0.1
   ffn_activation: "gelu"
@@ -42,7 +42,7 @@ optimizer_configs:
   schedule_method: noam
   scheduler_configs:
     d_model: 512
-    warmup_steps: 4000
+    warmup_steps: 6000
 
 training_configs:
   seed: 1234
@@ -53,17 +53,17 @@ training_configs:
   batching_key: "tokens"
   update_cycle: 1
   valid_batch_size: 20
-  disp_freq: 700
-  save_freq: 700
+  disp_freq: 1500
+  save_freq: 1500
   num_kept_checkpoints: 1
-  loss_valid_freq: 700
-  bleu_valid_freq: 700
+  loss_valid_freq: 1500
+  bleu_valid_freq: 1500
   bleu_valid_batch_size: 5
-  bleu_valid_warmup: 10
+  bleu_valid_warmup: 5
   bleu_valid_configs:
     max_steps: 150
     beam_size: 5
-    alpha: 0.0
+    alpha: 0.8
     sacrebleu_args: "--tokenize zh"
     postprocess: false
   early_stop_patience: 30

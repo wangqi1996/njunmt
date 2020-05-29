@@ -256,7 +256,7 @@ def rerank_max(beam_size, outputs):
 if __name__ == '__main__':
     # rerank_max(beam_size=5, outputs="/home/user_data55/wangdq/code/njunmt/log/zh2en/outputmt03.a")
     rerank_config = [
-        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/en2zh/transformer_en2zh_bpe.yaml",
+        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/en2zh/transformer_en2zh_bpe_new.yaml",
          "path": "/home/user_data55/wangdq/code/njunmt_dist/save/en2zh_baseline/transformer.best.final",
          "type": "t2s",
          "weight": 1.5},

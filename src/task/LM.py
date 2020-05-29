@@ -13,7 +13,7 @@ import src.distributed as dist
 from src.data.data_iterator import DataIterator
 from src.data.dataset import TextLineDataset, ZipDataset
 from src.data.vocabulary import Vocabulary
-from src.decoding import beam_search, ensemble_beam_search
+from src.decoding import beam_search
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model, load_predefined_configs
 from src.modules.criterions import NMTCriterion
@@ -240,85 +240,6 @@ def inference(valid_iterator,
     return trans_in_all_beams
 
 
-def ensemble_inference(valid_iterator,
-                       models,
-                       vocab_tgt: Vocabulary,
-                       batch_size,
-                       max_steps,
-                       beam_size=5,
-                       alpha=-1.0,
-                       rank=0,
-                       world_size=1,
-                       using_numbering_iterator=True
-                       ):
-    for model in models:
-        model.eval()
-
-    trans_in_all_beams = [[] for _ in range(beam_size)]
-
-    # assert keep_n_beams <= beam_size
-
-    if using_numbering_iterator:
-        numbers = []
-
-    if rank == 0:
-        infer_progress_bar = tqdm(total=len(valid_iterator),
-                                  desc=' - (Infer)  ',
-                                  unit="sents")
-    else:
-        infer_progress_bar = None
-
-    valid_iter = valid_iterator.build_generator(batch_size=batch_size)
-
-    for batch in valid_iter:
-
-        seq_numbers = batch[0]
-
-        if using_numbering_iterator:
-            numbers += seq_numbers
-
-        seqs_x = batch[1]
-
-        if infer_progress_bar is not None:
-            infer_progress_bar.update(len(seqs_x) * world_size)
-
-        x = prepare_data(seqs_x, seqs_y=None, cuda=Constants.USE_GPU)
-
-        with torch.no_grad():
-            word_ids = ensemble_beam_search(
-                nmt_models=models,
-                beam_size=beam_size,
-                max_steps=max_steps,
-                src_seqs=x,
-                alpha=alpha
-            )
-
-        word_ids = word_ids.cpu().numpy().tolist()
-
-        # Append result
-        for sent_t in word_ids:
-            for ii, sent_ in enumerate(sent_t):
-                sent_ = vocab_tgt.ids2sent(sent_)
-                if sent_ == "":
-                    sent_ = '%s' % vocab_tgt.id2token(vocab_tgt.eos)
-                trans_in_all_beams[ii].append(sent_)
-
-    if infer_progress_bar is not None:
-        infer_progress_bar.close()
-
-    if world_size > 1:
-        if using_numbering_iterator:
-            numbers = dist.all_gather_py_with_shared_fs(numbers)
-
-        trans_in_all_beams = [combine_from_all_shards(trans) for trans in trans_in_all_beams]
-
-    if using_numbering_iterator:
-        origin_order = np.argsort(numbers).tolist()
-        trans_in_all_beams = [[trans[ii] for ii in origin_order] for trans in trans_in_all_beams]
-
-    return trans_in_all_beams
-
-
 def loss_evaluation(model, critic, valid_iterator, rank=0, world_size=1):
     """
     :type model: Transformer
@@ -429,7 +350,6 @@ def froze_params(nmt_model, froze_config):
             if name.startswith(_froze):
                 param.requires_grad = False
                 break
-
 
 
 def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None):
