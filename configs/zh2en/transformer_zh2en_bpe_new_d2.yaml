@@ -29,7 +29,7 @@ model_configs:
   d_word_vec: 512
   d_model: 512
   d_inner_hid: 2048
-  dropout: 0.4
+  dropout: 0.2
   proj_share_weight: true
   label_smoothing: 0.1
   ffn_activation: "gelu"
@@ -49,7 +49,7 @@ training_configs:
   max_epochs: 100
   shuffle: true
   use_bucket: true
-  batch_size: 8192
+  batch_size: 3072
   batching_key: "tokens"
   update_cycle: 1
   valid_batch_size: 20

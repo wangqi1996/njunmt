@@ -66,6 +66,9 @@ class Constants:
     EOS = 1
     BOS = 2
     UNK = 3
+    BTTAG = 4
+
+    USE_BT = False
 
 
 time_format = '%Y-%m-%d %H:%M:%S'

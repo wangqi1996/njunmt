@@ -24,6 +24,7 @@ import torch
 
 from src.models.base import NMTModel
 from src.utils.common_utils import Constants
+from src.utils.logging import INFO
 from .utils import mask_scores, tensor_gather_helper
 
 
@@ -39,7 +40,6 @@ def beam_search(nmt_model, beam_size, max_steps, src_seqs, alpha=-1.0, sample_K=
     Returns:
 
     """
-
     batch_size = src_seqs.size(0)
 
     enc_outputs = nmt_model.encode(src_seqs)

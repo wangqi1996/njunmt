@@ -22,15 +22,16 @@ def INFO(string):
 
 def create_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file', type=str)
+    parser.add_argument('--file', type=str, default="/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.token")
     parser.add_argument('--num', type=int, default=0, help="Number of words to keep.")
     parser.add_argument('--freq', type=int, default=0, help="Least frequency to keep")
-    parser.add_argument('--char', action='store_true', default=False, help="Split words into characters.")
+    parser.add_argument('--char', action='store_true', default=True, help="Split words into characters.")
     parser.add_argument('--verbose', type=int, default=100000)
     return parser
 
 
 def main(filename, num, freq, char, verbose):
+    dict_filename = "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.char.dict"
     assert num * freq == 0, 'Choose only one between -N and -F'
 
     # print 'Processing', filename
@@ -41,7 +42,8 @@ def main(filename, num, freq, char, verbose):
         for i, line in enumerate(f):
             words_in = line.strip().split(' ')
             if char:
-                words_in = sum([list(w.decode('utf-8')) for w in words_in], [])
+                # words_in = sum([list(w.decode('utf-8')) for w in words_in], [])
+                words_in = sum([list(w) for w in words_in], [])
 
             for w in words_in:
                 if w not in word_freqs:
@@ -74,7 +76,7 @@ def main(filename, num, freq, char, verbose):
     INFO('Done.')
     INFO('Save at {0}'.format('%s.json' % os.path.basename(filename)))
 
-    with open('%s.json' % os.path.basename(filename), 'w') as f:
+    with open(dict_filename, 'w') as f:
         json.dump(worddict, f, indent=1)
 
     print('Done')

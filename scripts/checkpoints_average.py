@@ -23,9 +23,8 @@
 import argparse
 import collections
 import os
-from typing import List
-
 import torch
+from typing import List
 
 
 def load_model_parameters(path, map_location="cpu"):
@@ -35,7 +34,7 @@ def load_model_parameters(path, map_location="cpu"):
         return state_dict["model"]
     return state_dict
 
-
+# 直接平均参数
 def average_checkpoints(checkpoints_path: List):
     ave_state_dict = collections.OrderedDict()
     param_names = None
@@ -64,12 +63,16 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--checkpoint_dir", type=str,
+                        default="/home/user_data55/wangdq/save/uy2zh/final/uy2zh_sample_big_ave",
                         help="Directory to store checkpoints")
 
     parser.add_argument("--checkpoints", type=str, nargs="+",
+                        default="transformer.best.101500,transformer.best.115500,transformer.best.119000,transformer.best.129500,transformer.best.140000,transformer.best.150500",
+                        # default="transformer.ckpt.199500,transformer.ckpt.203000,transformer.ckpt.206500,transformer.ckpt.210000,transformer.ckpt.213500,transformer.ckpt.217000",
                         help="Names of checkpoint files to be averaged.")
 
     parser.add_argument("--saveto", type=str,
+                        default="/home/user_data55/wangdq/save/uy2zh/final/uy2zh_sample_big_ave/checkpoint.best.ave",
                         help="Saving path of averaged checkpoint (only model parameters).")
 
     args = parser.parse_args()
@@ -78,7 +81,7 @@ def parse_args():
 
 
 def main(args):
-    checkpoints_path = [os.path.join(args.checkpoint_dir, ckpt) for ckpt in args.checkpoints]
+    checkpoints_path = [os.path.join(args.checkpoint_dir, ckpt) for ckpt in args.checkpoints.split(',')]
 
     ave_state_dict = average_checkpoints(checkpoints_path)
 
@@ -88,3 +91,7 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
+
+
+
+# "transformer.best.101500,transformer.best.115500,transformer.best.119000,transformer.best.129500,transformer.best.140000,transformer.best.150500

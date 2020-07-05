@@ -9,7 +9,8 @@ RESERVED_TOKENS_DICT = {
     "<PAD>": (0, 0),
     "<EOS>": (1, 0),
     "<BOS>": (2, 0),
-    "<UNK>": (3, 0)
+    "<UNK>": (3, 0),
+    "<BTTAG>": (4, 0)
 }
 
 
@@ -26,6 +27,9 @@ class Vocabulary(object):
 
         self._id2token = dict([(ii[0], ww) for ww, ii in self._token2id_feq.items()])
         self.max_n_words = len(self._token2id_feq) if max_n_words == -1 else max_n_words
+
+    def __len__(self):
+        return self.max_n_words
 
     @staticmethod
     def build_from_file(type: str, dict_path: str, max_n_words: int, add_mask=False, **kwargs) -> 'Vocabulary':
@@ -76,6 +80,10 @@ class Vocabulary(object):
     @property
     def unk(self):
         return 3
+
+    @property
+    def bttag(self):
+        return 4
 
     def token2id(self, word):
 

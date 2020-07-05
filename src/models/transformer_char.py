@@ -39,7 +39,7 @@ from src.utils.common_utils import Constants
 PAD = Constants.PAD
 
 __all__ = [
-    'Transformer',
+    'Transformer_Char',
     'transformer_base_v1',
     'transformer_base_v2',
     'transformer_low_resource'
@@ -268,7 +268,7 @@ class DecoderLayer(nn.Module):
     ''' Compose with three layers '''
 
     def __init__(self, d_model, d_inner_hid, n_head, dim_per_head, dropout=0.1, layer_norm_first=True,
-                 ffn_activation="relu", contain_char_attn=True):
+                 ffn_activation="relu", contain_char_attn=False):
         super(DecoderLayer, self).__init__()
 
         self.slf_attn = SelfAttentionBlock(head_count=n_head, model_dim=d_model, dropout=dropout,
@@ -295,17 +295,17 @@ class DecoderLayer(nn.Module):
 
         query, _, self_attn_cache = self.slf_attn(dec_input, mask=slf_attn_mask, self_attn_cache=self_attn_cache)
 
-        char_attn = query
-        if self.contrain_char_attn:
-            char_attn, char_weights, char_attn_cache = self.char_attn(attn_values, src_char_emb, mask=src_char_mask,
-                                                                  enc_attn_cache=char_attn_cache)
+        # char_attn = query
+        # if self.contrain_char_attn:
+        #     char_attn, char_weights, char_attn_cache = self.char_attn(attn_values, src_char_emb, mask=src_char_mask,
+        #                                                           enc_attn_cache=char_attn_cache)
 
-        # attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
-        #                                                           enc_attn_cache=enc_attn_cache, sample_K=sample_K,
-        #                                                           seed=seed)
+        attn_values, attn_weights, enc_attn_cache = self.ctx_attn(query, enc_output, mask=dec_enc_attn_mask,
+                                                                  enc_attn_cache=enc_attn_cache, sample_K=sample_K,
+                                                                  seed=seed)
 
-        # output = self.pos_ffn(attn_values)
-        output = self.pos_ffn(char_attn)
+        output = self.pos_ffn(attn_values)
+        # output = self.pos_ffn(char_attn)
 
         return output, attn_weights, self_attn_cache, enc_attn_cache, char_attn_cache
 

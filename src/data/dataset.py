@@ -29,7 +29,8 @@ from .vocabulary import Vocabulary
 
 __all__ = [
     'TextLineDataset',
-    'ZipDataset'
+    'ZipDataset',
+    'AttributeDataset'
 ]
 
 
@@ -179,6 +180,39 @@ class TextLineDataset(Dataset):
             return None
 
         return Record(line, size=len(line))
+
+
+class AttributeDataset(Dataset):
+    """
+    ```AttributeDataset``` is one kind of dataset each line of which is an attribute of each corresponding sample.
+    """
+
+    def __init__(self,
+                 data_path,
+                 max_len=-1,
+                 is_train_dataset=False
+                 ):
+        super(AttributeDataset, self).__init__()
+
+        self._data_path = data_path
+        self._max_len = max_len
+
+        self.set_size(get_num_of_lines(self._data_path))
+        self.is_train_data = is_train_dataset
+
+    def _data_iter(self):
+        return open(self._data_path)
+
+    def _apply(self, line):
+        """
+        Process one line, convert str like number into float
+
+        :type line: str
+        """
+        splited = line.strip().split(' ')
+        float_line = [float(i) for i in splited]
+
+        return Record(float_line, size=len(float_line))
 
 
 class ZipDataset(Dataset):

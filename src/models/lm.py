@@ -11,8 +11,8 @@ class LM(nn.Module):
             self, vocab_size, embedding_size=300, hidden_size=512, num_layers=2, dropout=0.3, shared_weight=True,
             **kwargs):
         super().__init__()
-        self.embedding = Embeddings(num_embeddings=embedding_size,
-                                    embedding_dim=vocab_size,
+        self.embedding = Embeddings(num_embeddings=vocab_size,
+                                    embedding_dim=embedding_size,
                                     dropout=dropout)
 
         self.rnn = nn.LSTM(
@@ -33,7 +33,7 @@ class LM(nn.Module):
         # 投影层
         self.proj = nn.Linear(embedding_size, vocab_size, bias=False)
         if shared_weight:
-            self.proj.weight = self.embedding.weight
+            self.proj.weight = self.embedding.embeddings.weight
         else:
             my_init.default_init(self.proj.weight)
 

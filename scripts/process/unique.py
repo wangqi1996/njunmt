@@ -84,6 +84,11 @@ def process(filename1, filename2):
                 #     print(l1)
                 #     print(l2)
                 #     continue
+                # 语种检测  难用！！
+                # import langid
+                # if langid.classify(l1)[0] != 'zh' or langid.classify(l2)[0] != 'en':
+                #     print(langid.classify(l1)[0]  + l1)
+                #     print(langid.classify(l2)[0] + l2)
                 l1 = l1.strip().strip('\n').strip()
                 l2 = l2.strip().strip('\n').strip()
                 # 全角转半角

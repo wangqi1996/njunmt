@@ -1,0 +1,44 @@
+data_configs:
+  lang_pair: "uy-zh"
+  train_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/BT600/zh.token"
+  valid_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh.test"
+  vocabularies:
+    - type: "bpe"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/BT600/zh.vocab"
+      max_n_words: -1
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/BT600/zh.code"
+  max_len:
+    - 100
+    - 100
+
+model_configs:
+  model: LM
+  embedding_size: 300
+  hidden_size: 512
+  num_layers: 2
+  dropout: 0.3
+  shared_weight: true
+
+optimizer_configs:
+  optimizer: "adam"
+  learning_rate: 0.0001
+  grad_clip: -1.0
+  optimizer_params: ~
+
+training_configs:
+  seed: 1234
+  max_epochs: 100
+  shuffle: true
+  use_bucket: true
+  batch_size: 2048
+  batching_key: "tokens"
+  valid_batch_size: 100
+  disp_freq: 1500
+  save_freq: 1500
+  bleu_valid_warmup: 1
+  num_kept_checkpoints: 1
+  loss_valid_freq: 1500
+  bleu_valid_freq: 1500
+  early_stop_patience: 20

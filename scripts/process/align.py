@@ -1,7 +1,7 @@
 # coding=utf-8
 
 
-def cut_by_align(f1_name, f2_name, forward, backward):
+def cut_by_align(f1_name, f2_name, forward, backward, t):
     newf1 = f1_name + '.new'
     newf2 = f2_name + '.new'
     c1 = []
@@ -14,7 +14,7 @@ def cut_by_align(f1_name, f2_name, forward, backward):
                 len_f2 = len(l2.split(' '))
                 len_o = len(o.split(' '))
                 len_b = len(b.split(' '))
-                if len_o > len_f1 * 0.55 or len_b > len_f2 * 0.55:
+                if len_o > len_f1 * t or len_b > len_f2 * t:
                     c1.append(l1)
                     c2.append(l2)
                 else:
@@ -41,4 +41,4 @@ if __name__ == '__main__':
     # f3 = "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/zh_en_align"
     # f4 = "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/en_zh_align"
 
-    cut_by_align(f1, f2, f3, f4)
+    cut_by_align(f1, f2, f3, f4, float(sys.argv[5]))

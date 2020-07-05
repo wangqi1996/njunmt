@@ -7,7 +7,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 import src.distributed as dist
-# from scripts.checkpoints_average import average_checkpoints
+from scripts.checkpoints_average import average_checkpoints
 from src.data.data_iterator import DataIterator
 from src.data.dataset import TextLineDataset, ZipDataset
 from src.data.vocabulary import Vocabulary
@@ -595,22 +595,22 @@ def train(flags):
                         # - ave_k_best
                         # - ma
 
-                        # if training_configs['teacher_choice'] == 'ma':
-                        #     teacher_params = ma.export_ma_params()
-                        # elif training_configs['teacher_choice'] == 'best':
-                        #     teacher_params = nmt_model.state_dict()
-                        # elif "ave_best" in training_configs['teacher_choice']:
-                        #     if best_k_saver.num_saved >= ave_best_k:
-                        #         teacher_params = average_checkpoints(best_k_saver.get_all_ckpt_path()[-ave_best_k:])
-                        #     else:
-                        #         teacher_params = nmt_model.state_dict()
-                        # else:
-                        #     raise ValueError(
-                        #         "can not support teacher choice %s" % training_configs['teacher_choice'])
-                        # torch.save(teacher_params, teacher_model_path)
-                        # del teacher_params
-                        # teacher_patience = 0
-                        # critic.set_use_KD(False)
+                        if training_configs['teacher_choice'] == 'ma':
+                            teacher_params = ma.export_ma_params()
+                        elif training_configs['teacher_choice'] == 'best':
+                            teacher_params = nmt_model.state_dict()
+                        elif "ave_best" in training_configs['teacher_choice']:
+                            if best_k_saver.num_saved >= ave_best_k:
+                                teacher_params = average_checkpoints(best_k_saver.get_all_ckpt_path()[-ave_best_k:])
+                            else:
+                                teacher_params = nmt_model.state_dict()
+                        else:
+                            raise ValueError(
+                                "can not support teacher choice %s" % training_configs['teacher_choice'])
+                        torch.save(teacher_params, teacher_model_path)
+                        del teacher_params
+                        teacher_patience = 0
+                        critic.set_use_KD(False)
                     else:
                         teacher_patience += 1
                         if teacher_patience >= training_configs['teacher_refresh_warmup']:

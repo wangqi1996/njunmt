@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from src.models.bert import Bert
+from src.models.lm import LM
 from src.models.transformer_char import Transformer_Char
+from src.models.transformer_relative import Transformer_Relative
+from src.utils.logging import INFO
 from .dl4mt import *
+from .lightconv import LightConvModel
 from .transformer import *
 
 __all__ = [
@@ -26,7 +30,9 @@ MODEL_CLS = {
     "DL4MT": DL4MT,
     "Transformer_Char": Transformer_Char,
     "Bert": Bert,
-    "LM": LM
+    "LM": LM,
+    "Transformer_Relative": Transformer_Relative,
+    "DynamicCNN": LightConvModel
 }
 
 DEFAULT_CONFIGS = {
@@ -44,7 +50,7 @@ def build_model(model: str, **kwargs):
         raise ValueError(
             "Invalid model class \'{}\' provided. Only {} are supported now.".format(
                 model, list(MODEL_CLS.keys())))
-
+    INFO("model_name:  " + model)
     return MODEL_CLS[model](**kwargs)
 
 

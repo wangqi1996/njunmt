@@ -114,6 +114,8 @@ class Embeddings(nn.Module):
     def forward(self, x):
 
         emb = self.embeddings(x)
+        # import pdb
+        # pdb.set_trace()
         emb = emb * self.scale
 
         if self.positional_embeddings is not None:

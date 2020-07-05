@@ -95,7 +95,7 @@ class DistributedOptimizer(Optimizer):
         # Split the parameters into buckets and by types as well
         # We only need to bucket and reduce parameters that require grad and
         # this is also true for backward since only the backward hooks for
-        # parameters that require grad will be registered with gradient
+        # parameters that require grad will be registered with grawdient
         # reduction functions
         params_to_bucket = [[], ]
         for p in self.params:

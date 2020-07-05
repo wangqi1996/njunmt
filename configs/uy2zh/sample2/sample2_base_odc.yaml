@@ -1,0 +1,91 @@
+data_configs:
+  lang_pair: "uy-zh"
+  train_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/zh.token"
+  valid_data:
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh.token"
+  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh"
+  vocabularies:
+    - type: "bpe"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.vocab"
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.code"
+      max_n_words: -1
+    - type: "bpe"
+      dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/zh.vocab"
+      max_n_words: -1
+      codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/zh.code"
+  max_len:
+    - 100
+    - 100
+  num_refs: 1
+  eval_at_char_level: false
+
+bt_configs:
+  bt_attribute_data: "/home/user_data55/liuzh/ccmt/bt_attrib_sample2.txt"
+  use_bttag: true
+  use_confidence: false
+
+model_configs:
+  model: Transformer
+  n_layers: 6
+  n_head: 8
+  d_word_vec: 512
+  d_model: 512
+  d_inner_hid: 2048
+  dropout: 0.1
+  proj_share_weight: true
+  label_smoothing: 0.1
+  ffn_activation: "gelu"
+  loss_configs:
+    - type: "nmt_criterion"
+      label_smoothing: 0.1
+      factor: 1
+    - type: "wordKD_criterion"
+      init_use_KD: false
+      factor: 1
+
+
+optimizer_configs:
+  optimizer: "adam"
+  learning_rate: 0.1
+  grad_clip: -1.0
+  optimizer_params: ~
+  schedule_method: noam
+  scheduler_configs:
+    d_model: 512
+    warmup_steps: 4000
+
+training_configs:
+  seed: 2314
+  max_epochs: 100
+  shuffle: true
+  use_bucket: true
+  batch_size: 2048
+  batching_key: "tokens"
+  update_cycle: 1
+  valid_batch_size: 20
+  disp_freq: 2000
+  save_freq: 2000
+  num_kept_checkpoints: 1
+  loss_valid_freq: 2000
+  bleu_valid_freq: 2000
+  bleu_valid_batch_size: 5
+  bleu_valid_warmup: 2
+  bleu_valid_configs:
+    max_steps: 150
+    beam_size: 5
+    alpha: 1.5
+    sacrebleu_args: "--tokenize zh"
+    postprocess: false
+  early_stop_patience: 30
+  use_odc: true
+  teacher_choice: "best"  # best ma ave_best_k
+  teacher_model_path: ''
+  moving_average_method: "ema" # ema sma two_phase_ema none
+  moving_average_start_epoch: 0
+  teacher_patience: 1 # This value controls the tolerance that we start to use ODC when current model is inferior to the best checkpoint.
+  teacher_refresh_warmup: 1 # After how many epoches we start to use ODC.
+  num_kept_last_k_checkpoints: 3
+  num_kept_best_k_checkpoints: 3

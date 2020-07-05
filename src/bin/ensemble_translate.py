@@ -24,7 +24,7 @@ import argparse
 import os
 
 from src.task.nmt import ensemble_translate
-from . import auto_mkdir
+from src.bin import auto_mkdir
 
 parser = argparse.ArgumentParser()
 

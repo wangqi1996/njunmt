@@ -45,7 +45,7 @@ optimizer_configs:
     warmup_steps: 4000
 
 training_configs:
-  seed: 1234
+  seed: 3456
   max_epochs: 100
   shuffle: true
   use_bucket: true

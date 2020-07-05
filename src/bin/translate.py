@@ -1,5 +1,5 @@
-import argparse
 import os
+import argparse
 
 from src.bin import auto_mkdir
 from src.task.nmt import translate
@@ -57,6 +57,9 @@ parser.add_argument("--ref_path", type=str,
 
 parser.add_argument("--num_refs", type=int, default=1,
                     help="""num_refs""")
+
+parser.add_argument("--sample_search_k", type=int, default=-1,
+                    help="""use sample topK search""")
 
 
 def run(**kwargs):

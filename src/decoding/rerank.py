@@ -3,7 +3,7 @@ from contextlib import ExitStack
 
 import torch
 
-from scripts.process_data import reverse_text
+# from scripts.process_data import reverse_text
 from src.data.data_iterator import DataIterator
 from src.data.dataset import TextLineDataset, ZipDataset
 from src.data.vocabulary import Vocabulary
@@ -206,7 +206,7 @@ class Rerank(object):
 
 
 def compute_bleu(f):
-    ref_path = '/home/user_data55/wangdq/data/ccmt/zh-en/dev2020/dev.en'
+    ref_path = '/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy'
     num_ref = 1
     bleu_scorer = SacreBLEUScorer(reference_path=ref_path,
                                   num_refs=num_ref,
@@ -256,21 +256,21 @@ def rerank_max(beam_size, outputs):
 if __name__ == '__main__':
     # rerank_max(beam_size=5, outputs="/home/user_data55/wangdq/code/njunmt/log/zh2en/outputmt03.a")
     rerank_config = [
-        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/en2zh/transformer_en2zh_bpe_new.yaml",
-         "path": "/home/user_data55/wangdq/code/njunmt_dist/save/en2zh_baseline/transformer.best.final",
-         "type": "t2s",
-         "weight": 1.5},
-        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/zh2en/transformer_zh2en_r2l_bpe.yaml",
-         "path": "/home/user_data55/wangdq/code/njunmt_dist/save/zh2en_r2l/transformer.best.final",
-         "type": "r2l",
-         "weight": 1.5},
-        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/zh2en/transformer_zh2en_bpe.yaml",
-         "path": "/home/user_data55/wangdq/code/njunmt_dist/save/zh2en_baseline/transformer.best.final",
+        {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/uy2zh/transformer_uy2zh_bpe_new.yaml",
+         "path": "/home/user_data55/wangdq/code/njunmt_dist/save/uy2zh/uy2zh_base/transformer.best.final",
          "type": "l2r",
-         "weight": 1},
+         "weight": 1.5},
+        # {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/zh2en/transformer_zh2en_r2l_bpe.yaml",
+        #  "path": "/home/user_data55/wangdq/code/njunmt_dist/save/zh2en_r2l/transformer.best.final",
+        #  "type": "r2l",
+        #  "weight": 1.5},
+        # {"config": "/home/user_data55/wangdq/code/njunmt_dist/configs/zh2en/transformer_zh2en_bpe.yaml",
+        #  "path": "/home/user_data55/wangdq/code/njunmt_dist/save/zh2en_baseline/transformer.best.final",
+        #  "type": "l2r",
+        #  "weight": 1},
 
     ]
-    src_filename = "/home/user_data55/wangdq/data/ccmt/zh-en/dev2020/dev.zh"
-    trg_filename = "/home/user_data55/wangdq/code/njunmt/log/zh2en/outputmt03."
+    src_filename = '/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy'
+    trg_filename = "/home/user_data55/wangdq/code/njunmt_dist/valid/trans.iter304500.txt"
     r = Rerank(rerank_config)
     r.compute_scores(src_filename, [trg_filename + str(i) for i in range(5)])

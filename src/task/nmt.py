@@ -11,9 +11,10 @@ from tqdm import tqdm
 
 import src.distributed as dist
 from src.data.data_iterator import DataIterator
-from src.data.dataset import TextLineDataset, ZipDataset
+from src.data.dataset import TextLineDataset, ZipDataset, AttributeDataset
 from src.data.vocabulary import Vocabulary
 from src.decoding import beam_search, ensemble_beam_search
+from src.decoding.sample_topK import beam_search as sample_search
 from src.metric.bleu_scorer import SacreBLEUScorer
 from src.models import build_model, load_predefined_configs
 from src.modules.criterions import NMTCriterion
@@ -77,7 +78,7 @@ def prepare_configs(config_path: str, predefined_config: str = "") -> dict:
     return configs
 
 
-def prepare_data(seqs_x, seqs_y, cuda=False, batch_first=True):
+def prepare_data(seqs_x, seqs_y, cuda=False, batch_first=True, bt_attrib=None):
     """
     Args:
         eval ('bool'): indicator for eval/infer.
@@ -108,6 +109,11 @@ def prepare_data(seqs_x, seqs_y, cuda=False, batch_first=True):
         return x
 
     seqs_x = list(map(lambda s: [Constants.BOS] + s + [Constants.EOS], seqs_x))
+
+    # add bt tag
+    if bt_attrib is not None and Constants.USE_BT and Constants.USE_BTTAG:
+        seqs_x = list(map(lambda s, is_bt: [Constants.BTTAG] + s if is_bt[0] else s, seqs_x, bt_attrib))
+
     x = _np_pad_batch_2D(samples=seqs_x, pad=Constants.PAD,
                          cuda=cuda, batch_first=batch_first)
 
@@ -174,7 +180,8 @@ def inference(valid_iterator,
               world_size=1,
               using_numbering_iterator=True,
               sample_K=0,
-              seed=0
+              seed=0,
+              sample_search_k=-1
               ):
     model.eval()
     trans_in_all_beams = [[] for _ in range(beam_size)]
@@ -208,8 +215,13 @@ def inference(valid_iterator,
         x = prepare_data(seqs_x, seqs_y=None, cuda=Constants.USE_GPU)
 
         with torch.no_grad():
-            word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x, alpha=alpha,
-                                   sample_K=sample_K, seed=seed)
+            if sample_search_k > 0:
+                word_ids = sample_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x,
+                                         alpha=alpha, sampling_topK=sample_search_k)
+            else:
+                word_ids = beam_search(nmt_model=model, beam_size=beam_size, max_steps=max_steps, src_seqs=x,
+                                       alpha=alpha,
+                                       sample_K=sample_K, seed=seed)
 
         word_ids = word_ids.cpu().numpy().tolist()
 
@@ -431,7 +443,6 @@ def froze_params(nmt_model, froze_config):
                 break
 
 
-
 def load_pretrained_model(nmt_model, pretrain_path, device, exclude_prefix=None):
     """
     Args:
@@ -530,7 +541,16 @@ def train(flags):
     model_configs = configs['model_configs']
     optimizer_configs = configs['optimizer_configs']
     training_configs = configs['training_configs']
-
+    bt_configs = configs['bt_configs'] if 'bt_configs' in configs else None
+    if bt_configs is not None:
+        print("btconfigs ", bt_configs)
+        if 'bt_attribute_data' not in bt_configs:
+            Constants.USE_BT = False
+            bt_configs = None
+        else:
+            Constants.USE_BT = True
+            Constants.USE_BTTAG = bt_configs['use_bttag']
+            Constants.USE_CONFIDENCE = bt_configs['use_confidence']
     INFO(pretty_configs(configs))
 
     Constants.SEED = training_configs['seed']
@@ -541,7 +561,6 @@ def train(flags):
 
     # ================================================================================== #
     # Load Data
-
     INFO('Loading data...')
     timer.tic()
 
@@ -552,19 +571,36 @@ def train(flags):
     Constants.EOS = vocab_src.eos
     Constants.PAD = vocab_src.pad
     Constants.BOS = vocab_src.bos
-
-    train_bitext_dataset = ZipDataset(
-        TextLineDataset(data_path=data_configs['train_data'][0],
-                        vocabulary=vocab_src,
-                        max_len=data_configs['max_len'][0],
-                        is_train_dataset=True
-                        ),
-        TextLineDataset(data_path=data_configs['train_data'][1],
-                        vocabulary=vocab_tgt,
-                        max_len=data_configs['max_len'][1],
-                        is_train_dataset=True
-                        )
-    )
+    # bt tag dataset
+    if Constants.USE_BT:
+        if Constants.USE_BTTAG:
+            Constants.BTTAG = vocab_src.bttag
+        train_bitext_dataset = ZipDataset(
+            TextLineDataset(data_path=data_configs['train_data'][0],
+                            vocabulary=vocab_src,
+                            max_len=data_configs['max_len'][0],
+                            is_train_dataset=True
+                            ),
+            TextLineDataset(data_path=data_configs['train_data'][1],
+                            vocabulary=vocab_tgt,
+                            max_len=data_configs['max_len'][1],
+                            is_train_dataset=True
+                            ),
+            AttributeDataset(data_path=bt_configs['bt_attribute_data'], is_train_dataset=True)
+        )
+    else:
+        train_bitext_dataset = ZipDataset(
+            TextLineDataset(data_path=data_configs['train_data'][0],
+                            vocabulary=vocab_src,
+                            max_len=data_configs['max_len'][0],
+                            is_train_dataset=True
+                            ),
+            TextLineDataset(data_path=data_configs['train_data'][1],
+                            vocabulary=vocab_tgt,
+                            max_len=data_configs['max_len'][1],
+                            is_train_dataset=True
+                            )
+        )
 
     valid_bitext_dataset = ZipDataset(
         TextLineDataset(data_path=data_configs['valid_data'][0],
@@ -670,7 +706,6 @@ def train(flags):
                                 optimizer=optim, scheduler_configs=optimizer_configs['scheduler_configs'])
 
     # 6. build moving average
-
     if training_configs['moving_average_method'] is not None:
         ma = MovingAverage(moving_average_method=training_configs['moving_average_method'],
                            named_params=nmt_model.named_parameters(),
@@ -740,16 +775,21 @@ def train(flags):
                                          )
         else:
             training_progress_bar = None
-
+        # INFO(Constants.USE_BT)
         for batch in training_iter:
-            seqs_x, seqs_y = batch
+            # bt attrib data
+            bt_attrib = None
+            if Constants.USE_BT:
+                seqs_x, seqs_y, bt_attrib = batch
+            else:
+                seqs_x, seqs_y = batch
 
             batch_size = len(seqs_x)
             cum_n_words += sum(len(s) for s in seqs_y)
 
             try:
                 # Prepare data
-                x, y = prepare_data(seqs_x, seqs_y, cuda=Constants.USE_GPU)
+                x, y = prepare_data(seqs_x, seqs_y, cuda=Constants.USE_GPU, bt_attrib=bt_attrib)
 
                 loss = compute_forward(model=nmt_model,
                                        critic=critic,
@@ -981,6 +1021,10 @@ def translate(flags):
     model_configs = configs['model_configs']
     training_configs = configs['training_configs']
 
+    Constants.SEED = training_configs['seed']
+
+    set_seed(Constants.SEED)
+
     timer = Timer()
     # ================================================================================== #
     # Load Data
@@ -1013,13 +1057,14 @@ def translate(flags):
     timer.tic()
     nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
                             n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
+                            vocab_tgt=vocab_tgt,
                             **model_configs)
     nmt_model.eval()
     INFO('Done. Elapsed time {0}'.format(timer.toc()))
 
     INFO('Reloading model parameters...')
     timer.tic()
-
+    INFO(flags.model_path)
     params = load_model_parameters(flags.model_path, map_location="cpu")
 
     nmt_model.load_state_dict(params)
@@ -1048,7 +1093,8 @@ def translate(flags):
         world_size=world_size,
         using_numbering_iterator=True,
         sample_K=flags.sample_K,
-        seed=flags.seed
+        seed=flags.seed,
+        sample_search_k=flags.sample_search_k
     )
 
     acc_time = timer.toc(return_seconds=True)
@@ -1098,7 +1144,8 @@ def ensemble_translate(flags):
     if rank != 0:
         close_logging()
 
-    config_path = os.path.abspath(flags.config_path)
+    flags.config_path = flags.config_path.split(',')
+    config_path = os.path.abspath(flags.config_path[0])
 
     with open(config_path.strip()) as f:
         configs = yaml.load(f)
@@ -1143,6 +1190,13 @@ def ensemble_translate(flags):
     model_path = flags.model_path.split(',')
 
     for ii in range(len(model_path)):
+        INFO(flags.config_path[ii])
+        config_path = os.path.abspath(flags.config_path[ii])
+
+        with open(config_path.strip()) as f:
+            configs = yaml.load(f)
+
+        model_configs = configs['model_configs']
 
         nmt_model = build_model(n_src_vocab=vocab_src.max_n_words,
                                 n_tgt_vocab=vocab_tgt.max_n_words, padding_idx=vocab_src.pad, vocab_src=vocab_src,
@@ -1152,7 +1206,7 @@ def ensemble_translate(flags):
 
         INFO('Reloading model parameters...')
         timer.tic()
-
+        INFO(model_path[ii])
         params = load_model_parameters(model_path[ii], map_location="cpu")
 
         nmt_model.load_state_dict(params, strict=False)
