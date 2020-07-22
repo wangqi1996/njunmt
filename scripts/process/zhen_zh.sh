@@ -72,6 +72,10 @@ python $nmt_script/align.py zh.token en.token zh_en_align en_zh_align
 mv zh.token.new zh.token
 mv en.token.new en.token
 
+# https://github.com/clab/fast_align/issues/33 计算对齐概率
+$fast_align_dir/fast_align -i token -d -v -o -p  uy2zh_params >uy2zh_align 2>uy2zh_error
+$fast_align_dir/fast_align -i token -d -v -r -o -p  zh2uy_params >zh2uyalign 2>zh2uy_error
+
 echo "using bpe"
 export lang=zh
 subword-nmt learn-bpe -s 32000 < $data_path/${lang}.token > $data_path/${lang}.code

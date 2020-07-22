@@ -22,7 +22,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 import src.utils.init as my_init
 from src.decoding.utils import tensor_gather_helper

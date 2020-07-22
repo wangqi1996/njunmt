@@ -9,13 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from fairseq import options, utils
-from fairseq.models import (
-    FairseqEncoder,
-    FairseqIncrementalDecoder,
-    FairseqEncoderDecoderModel,
-    register_model,
-    register_model_architecture,
-)
+from fairseq.models import FairseqIncrementalDecoder, FairseqEncoder
 from fairseq.modules import (
     AdaptiveSoftmax,
     DynamicConv,
@@ -65,7 +59,7 @@ class LightConvModel(NMTModel):
 
         def build_embedding(dictionary, embed_dim, path=None):
             num_embeddings = len(dictionary)
-            padding_idx = dictionary.pad()
+            padding_idx = dictionary.pad
             emb = Embedding(num_embeddings, embed_dim, padding_idx)
             return emb
 
@@ -92,7 +86,7 @@ class LightConvModel(NMTModel):
         return self.encoder(src_seq)
 
     def init_decoder(self, enc_outputs, expand_size=1):
-        batch = enc_outputs['encoder_out'].shape[0]
+        batch = enc_outputs['encoder_out'].shape[1]
         beam_size = expand_size
 
         new_order = torch.arange(batch).view(-1, 1).repeat(1, beam_size).view(-1)
@@ -107,17 +101,22 @@ class LightConvModel(NMTModel):
         return dec_states
 
     def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
-        encoder_out = dec_states['encoder_out']
+        encoder_out = dec_states['enc_outputs']
         incremental_state = dec_states['incremental_state']
-        logits, decoder_state = self.decoder(tgt_seq, encoder_out, incremental_state)
+        logits, decoder_state = self.decoder(tgt_seq, encoder_out, incremental_state, log_probs=log_probs)
         dec_states['incremental_state'] = incremental_state
-        return logits, dec_states
+        return logits.squeeze(1), dec_states
 
     def reorder_dec_states(self, dec_states, new_beam_indices, batch_size, beam_size):
-        encoder_out = dec_states['encoder_out']
+        encoder_out = dec_states['enc_outputs']
         incremental_state = dec_states['incremental_state']
-        encoder_out = self.encoder.reorder_encoder_out(encoder_out, new_beam_indices)
-        incremental_state = self.decoder.reorder_incremental_state(incremental_state, new_beam_indices)
+
+        range_ = (torch.arange(0, batch_size) * beam_size).long().to(device=new_beam_indices.device)
+
+        gather_indices_ = (new_beam_indices + torch.unsqueeze(range_, 1)).view(-1)
+
+        encoder_out = self.encoder.reorder_encoder_out(encoder_out, gather_indices_)
+        self.decoder.reorder_incremental_state(incremental_state, gather_indices_)
 
         dec_states = {
             "enc_outputs": encoder_out,
@@ -127,7 +126,7 @@ class LightConvModel(NMTModel):
         return dec_states
 
 
-class LightConvEncoder(nn.Module):
+class LightConvEncoder(FairseqEncoder):
     """
     LightConv encoder consisting of *args.encoder_layers* layers. Each layer
     is a :class:`LightConvEncoderLayer`.
@@ -139,7 +138,7 @@ class LightConvEncoder(nn.Module):
     """
 
     def __init__(self, args, dictionary, embed_tokens):
-        super().__init__()
+        super().__init__(dictionary)
         self.dropout = args.dropout
 
         embed_dim = embed_tokens.embedding_dim
@@ -232,7 +231,7 @@ class LightConvEncoder(nn.Module):
         return state_dict
 
 
-class LightConvDecoder(nn.Module):
+class LightConvDecoder(FairseqIncrementalDecoder):
     """
     LightConv decoder consisting of *args.decoder_layers* layers. Each layer
     is a :class:`LightConvDecoderLayer`.
@@ -277,9 +276,10 @@ class LightConvDecoder(nn.Module):
             self._beam_size = beam_size
 
     def __init__(self, args, dictionary, embed_tokens, no_encoder_attn=False, final_norm=True):
-        super().__init__()
+        super().__init__(dictionary)
         self.dropout = args.dropout
         self.share_input_output_embed = args.share_decoder_input_output_embed
+        self.padding_idx = dictionary.pad
 
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = args.decoder_embed_dim
@@ -765,45 +765,6 @@ def lightconv_wmt_zh_en_big(args):
 class Parameters:
     def __init__(self):
         pass
-        # self.encoder_embed_path = None
-        # self.encoder_embed_dim = None
-        # self.encoder_ffn_embed_dim = None
-        # self.encoder_layers = None
-        # self.encoder_attention_heads = None
-        # self.encoder_normalize_before = None
-        # self.encoder_learned_pos = None
-        # self.decoder_embed_path = None
-        # self.decoder_embed_dim = None
-        # self.decoder_ffn_embed_dim = None
-        # self.decoder_layers = None
-        # self.decoder_attention_heads = None
-        # self.decoder_normalize_before = None
-        # self.decoder_learned_pos = None
-        # self.attention_dropout = None
-        # self.relu_dropout = None
-        # self.dropout = None
-        # self.adaptive_softmax_cutoff = None
-        # self.adaptive_softmax_dropout = None
-        # self.share_decoder_input_output_embed = None
-        # self.share_all_embeddings = None
-        # self.no_token_positional_embeddings = None
-        #
-        # self.decoder_output_dim = None
-        # self.decoder_input_dim = None
-        #
-        # self.encoder_conv_dim = None
-        # self.decoder_conv_dim = None
-        #
-        # self.encoder_kernel_size_list = None
-        # self.decoder_kernel_size_list = None
-        #
-        # self.encoder_kernel_size_list = []
-        # self.decoder_kernel_size_list = []
-        #
-        # self.encoder_glu = None
-        # self.decoder_glu = None
-        # self.input_dropout = None
-        # self.weight_dropout = None
 
     def update(self, **kwargs):
         for key, value in kwargs.items():

@@ -11,13 +11,14 @@ mkdir -p $SAVETODIR
 
 python -m src.bin.translate \
     --model_name "transformer" \
-    --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/test/test.txt" \
-    --model_path "/home/user_data55/liuzh/ccmt_model/uy2zh/sample_big_relative/transformer_relative.best.final"  \
+    --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token" \
+    --model_path "/home/user_data55/wangdq/save/uy2zh/final/tune/relative1_tune_train/transformer_relative.best.final"  \
+    --ref_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh"  \
     --config_path "${CON}" \
     --batch_size 20 \
     --beam_size 5 \
     --alpha 1.5 \
     --use_gpu  \
-    --saveto "${SAVETODIR}/ttt.out" \
+    --saveto "${SAVETODIR}/sample1.out" \
     --num_refs 1  \
 #    --sample_search_k 2

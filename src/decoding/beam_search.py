@@ -24,7 +24,6 @@ import torch
 
 from src.models.base import NMTModel
 from src.utils.common_utils import Constants
-from src.utils.logging import INFO
 from .utils import mask_scores, tensor_gather_helper
 
 

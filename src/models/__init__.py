@@ -16,8 +16,11 @@ from src.models.lm import LM
 from src.models.transformer_char import Transformer_Char
 from src.models.transformer_relative import Transformer_Relative
 from src.utils.logging import INFO
+from . import CNN
+from .CNN import FConvModel
 from .dl4mt import *
 from .lightconv import LightConvModel
+from .lstm import LSTMModel
 from .transformer import *
 
 __all__ = [
@@ -32,7 +35,9 @@ MODEL_CLS = {
     "Bert": Bert,
     "LM": LM,
     "Transformer_Relative": Transformer_Relative,
-    "DynamicCNN": LightConvModel
+    "DynamicCNN": LightConvModel,
+    "LSTM": LSTMModel,
+    "CNN": FConvModel
 }
 
 DEFAULT_CONFIGS = {
@@ -41,7 +46,7 @@ DEFAULT_CONFIGS = {
     "transformer_base_v2": transformer_base_v2,
     "transformer_low_resource": transformer_low_resource,
     "dl4mt_base": dl4mt_base,
-    "bert": transformer_base_v2
+    "bert": transformer_base_v2,
 }
 
 

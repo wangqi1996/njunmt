@@ -1,0 +1,1 @@
+python -m src.bin.train --model_name "transformer_relative"  --use_gpu   --config_path "configs/uy2zh/final/sample_big_relative.yaml"    --task  "select"   --pretrain_path "/home/user_data55/liuzh/ccmt_model/uy2zh/sample_big_relative/transformer_relative.best.final"

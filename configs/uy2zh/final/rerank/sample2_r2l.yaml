@@ -1,12 +1,12 @@
 data_configs:
   lang_pair: "uy-zh"
   train_data:
-    - "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/test/train.en"
-    - "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/test/train.zh"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/uy.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/sample2/reverse/zh.token.reverse"
   valid_data:
-    - "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/test/train.en"
-    - "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/test/train.zh"
-  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/zh-en/parallel/test/train.zh"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token"
+    - "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/reverse/dev.zh.token.reverse"
+  bleu_valid_reference: "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/reverse/dev.zh.reverse"
   vocabularies:
     - type: "bpe"
       dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/sample_all/uy.vocab"
@@ -46,7 +46,7 @@ optimizer_configs:
   optimizer_params: ~
   schedule_method: noam
   scheduler_configs:
-    d_model: 1024
+    d_model: 512
     warmup_steps: 4000
 
 training_configs:

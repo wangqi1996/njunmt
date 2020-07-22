@@ -26,8 +26,8 @@ export dynamic_cnn=$MODEL/dynamic_cnn_tune_train/dynamicCnn.best.final
 python -m src.bin.ensemble_translate \
   --model_name "transformer" \
   --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token" \
-  --config_path "$csample1,$csample2,$crelative2,$cave,$cdynamic_cnn" \
-  --model_path "$sample1,$sample2,$relative2,$ave,$dynamic_cnn" \
+  --config_path "$csample1,$csample2,$crelative1,$cave,$cdynamic_cnn" \
+  --model_path "$sample1,$sample2,$relative1,$ave,$dynamic_cnn" \
   --batch_size 20 \
   --beam_size 5 \
   --alpha 1.5 \

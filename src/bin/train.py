@@ -5,6 +5,8 @@ from src.task.LM import train as LM
 from src.task.multi_loss import train as odc_train
 from src.task.nmt import train as nmt_train
 from src.task.pretrain import train as pretrain
+from src.task.select import train as select
+from src.task.tune import tune
 
 parser = argparse.ArgumentParser()
 
@@ -46,7 +48,7 @@ parser.add_argument("--predefined_config", type=str, default=None,
 parser.add_argument('--display_loss_detail', action="store_true",
                     help="Whether to display loss detail.")
 
-parser.add_argument("--task", type=str, choices=["nmt", "odc", "mlm", "lm"], default="nmt")
+parser.add_argument("--task", type=str, choices=["nmt", "odc", "mlm", "lm", 'tune', 'select'], default="nmt")
 
 # encoder、decoder、generator
 parser.add_argument("--pretrain_exclude_prefix", type=str, default=None, help="split by ;")
@@ -73,6 +75,10 @@ def run(**kwargs):
         pretrain(args)
     elif args.task == 'lm':
         LM(args)
+    elif args.task == "tune":
+        tune(args)
+    elif args.task == 'select':
+        select(args)
     else:
         raise ValueError("not support task!")
 

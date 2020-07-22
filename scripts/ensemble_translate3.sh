@@ -25,16 +25,16 @@ export dynamic_cnn=$MODEL/dynamic_cnn_tune_train/dynamicCnn.best.final
 
 python -m src.bin.ensemble_translate \
   --model_name "transformer" \
-  --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.uy.token" \
-  --config_path "$csample1,$csample2,$crelative2,$cave,$cdynamic_cnn" \
-  --model_path "$sample1,$sample2,$relative2,$ave,$dynamic_cnn" \
-  --batch_size 20 \
-  --beam_size 5 \
+  --source_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/tt" \
+  --config_path "$csample1,$csample2,$crelative1,$crelative2,$cave,$cdynamic_cnn" \
+  --model_path "$sample1,$sample2,$relative1,$relative2,$ave,$dynamic_cnn" \
+  --batch_size 5 \
+  --beam_size 24 \
   --alpha 1.5 \
   --use_gpu \
-  --saveto "${SAVETODIR}/test.out" \
-  --ref_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh" \
-  --num_refs 1
+  --saveto "${SAVETODIR}/tt.out" \
+#  --ref_path "/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/dev.zh" \
+#  --num_refs 1
 
 #
 

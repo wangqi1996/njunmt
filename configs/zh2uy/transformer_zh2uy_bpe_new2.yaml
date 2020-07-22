@@ -12,10 +12,12 @@ data_configs:
       dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.vocab"
       max_n_words: -1
       codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/zh.code"
+      use_pad: False
     - type: "bpe"
       dict_path: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.vocab"
       codes: "/home/user_data55/wangdq/data/ccmt/uy-zh/parallel/uy.code"
       max_n_words: -1
+      use_pad: False
   max_len:
     - 100
     - 100

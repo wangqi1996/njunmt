@@ -36,5 +36,5 @@ if __name__ == '__main__':
     import sys
     #
     # reverse(sys.argv[1])
-    # reverse("tt")
-    join("/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/reverse/dev.zh.token.reverse")
+    reverse("/home/user_data55/wangdq/data/ccmt/uy-zh/sample3/zh.token")
+    # join("/home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/reverse/dev.zh.token.reverse")

@@ -20,7 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import numpy as np
 import torch
 
 from src.modules.tensor_utils import FLOAT32_INF
@@ -71,3 +70,16 @@ def tensor_gather_helper(gather_indices,
 
     return output.view(*out_size)
 
+
+def tensor_gather_helper2(gather_indices,
+                          gather_from,
+                          batch_size,
+                          beam_size,
+                          gather_shape):
+    range_ = (torch.arange(0, batch_size) * beam_size).long().to(device=gather_indices.device)
+
+    gather_indices_ = (gather_indices + torch.unsqueeze(range_, 1)).view(-1)
+
+    output = torch.index_select(gather_from.view(*gather_shape), 0, gather_indices_)
+
+    return output

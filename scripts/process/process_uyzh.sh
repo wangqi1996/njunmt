@@ -98,28 +98,28 @@ echo "done"
 
 # -----------------------------------------------------------------------------------------------------------------------
 
-## dev && test
-#mosedir=/home/user_data55/wangdq/code/mosesdecoder/scripts/tokenizer
-#nmt_script=/home/user_data55/wangdq/code/njunmt_dist/scripts/process
-#
-#cd /home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/data/CWMT2018-TestSet-UC
-#perl $mosedir/../ems/support/input-from-sgm.perl  < CWMT2018-uc-news-test-ref.xml > dev.zh
-#perl $mosedir/../ems/support/input-from-sgm.perl  < CWMT2018-uc-news-test-src.xml > dev.uy
-#
-## 转义
-#perl $mosedir/deescape-special-chars.perl < dev.zh > dev.zh.n
-#perl $mosedir/deescape-special-chars.perl  < dev.uy > dev.uy.n
-#mv dev.zh.n dev.zh
-#mv dev.uy.n dev.uy
-#
-# # normalize-punctuation.perl  汉语和维语统一处理，有必要做吗？
-#perl $mosedir/normalize-punctuation.perl -l zh < dev.zh > dev.zh.n
-#perl $mosedir/normalize-punctuation.perl -l uy < dev.uy > dev.uy.n
-#mv dev.zh.n dev.zh
-#mv dev.uy.n dev.uy
-#
-## tokenizer 只用中文
-#python $nmt_script/split_zh.py dev.zh dev.zh.token
+# dev && test
+mosedir=/home/user_data55/wangdq/code/mosesdecoder/scripts/tokenizer
+nmt_script=/home/user_data55/wangdq/code/njunmt_dist/scripts/process
+
+cd /home/user_data55/wangdq/data/ccmt/uy-zh/dev2020/data/CWMT2018-TestSet-UC
+perl $mosedir/../ems/support/input-from-sgm.perl  < CWMT2018-uc-news-test-ref.xml > dev.zh
+perl $mosedir/../ems/support/input-from-sgm.perl  < CWMT2018-uc-news-test-src.xml > dev.uy
+
+# 转义
+perl $mosedir/deescape-special-chars.perl < dev.zh > dev.zh.n
+perl $mosedir/deescape-special-chars.perl  < dev.uy > dev.uy.n
+mv dev.zh.n dev.zh
+mv dev.uy.n dev.uy
+
+ # normalize-punctuation.perl  汉语和维语统一处理，有必要做吗？
+perl $mosedir/normalize-punctuation.perl -l zh < dev.zh > dev.zh.n
+perl $mosedir/normalize-punctuation.perl -l uy < dev.uy > dev.uy.n
+mv dev.zh.n dev.zh
+mv dev.uy.n dev.uy
+
+# tokenizer 只用中文
+python $nmt_script/split_zh.py dev.zh dev.zh.token
 
 # -----------------------------------------------------------------------------------------------------------------------
 

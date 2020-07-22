@@ -8,111 +8,67 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from fairseq import utils
 from fairseq.models import (
     FairseqEncoder,
     FairseqIncrementalDecoder,
-    FairseqEncoderDecoderModel,
-    register_model,
-    register_model_architecture,
 )
 from fairseq.modules import (
     AdaptiveSoftmax, BeamableMM, GradMultiply, LearnedPositionalEmbedding,
     LinearizedConvolution,
 )
 
+from src.models.base import NMTModel
+from src.models.lightconv import Parameters
 
-@register_model('fconv')
-class FConvModel(FairseqEncoderDecoderModel):
+
+class FConvModel(NMTModel):
     """
     A fully convolutional model, i.e. a convolutional encoder and a
     convolutional decoder, as described in `"Convolutional Sequence to Sequence
     Learning" (Gehring et al., 2017) <https://arxiv.org/abs/1705.03122>`_.
+
     Args:
         encoder (FConvEncoder): the encoder
         decoder (FConvDecoder): the decoder
+
     The Convolutional model provides the following named architectures and
     command-line arguments:
+
     .. argparse::
         :ref: fairseq.models.fconv_parser
         :prog:
     """
 
-    @classmethod
-    def hub_models(cls):
+    def __init__(self, **kwargs):
+        super().__init__()
 
-        def moses_subword(path):
-            return {
-                'path': path,
-                'tokenizer': 'moses',
-                'bpe': 'subword_nmt',
-            }
-
-        return {
-            'conv.wmt14.en-fr': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt14.v2.en-fr.fconv-py.tar.bz2'),
-            'conv.wmt14.en-de': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt14.en-de.fconv-py.tar.bz2'),
-            'conv.wmt17.en-de': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt17.v2.en-de.fconv-py.tar.bz2'),
-        }
-
-    def __init__(self, encoder, decoder):
-        super().__init__(encoder, decoder)
-        self.encoder.num_attention_layers = sum(layer is not None for layer in decoder.attention)
-
-    @staticmethod
-    def add_args(parser):
-        """Add model-specific arguments to the parser."""
-        # fmt: off
-        parser.add_argument('--dropout', type=float, metavar='D',
-                            help='dropout probability')
-        parser.add_argument('--encoder-embed-dim', type=int, metavar='N',
-                            help='encoder embedding dimension')
-        parser.add_argument('--encoder-embed-path', type=str, metavar='STR',
-                            help='path to pre-trained encoder embedding')
-        parser.add_argument('--encoder-layers', type=str, metavar='EXPR',
-                            help='encoder layers [(dim, kernel_size), ...]')
-        parser.add_argument('--decoder-embed-dim', type=int, metavar='N',
-                            help='decoder embedding dimension')
-        parser.add_argument('--decoder-embed-path', type=str, metavar='STR',
-                            help='path to pre-trained decoder embedding')
-        parser.add_argument('--decoder-layers', type=str, metavar='EXPR',
-                            help='decoder layers [(dim, kernel_size), ...]')
-        parser.add_argument('--decoder-out-embed-dim', type=int, metavar='N',
-                            help='decoder output embedding dimension')
-        parser.add_argument('--decoder-attention', type=str, metavar='EXPR',
-                            help='decoder attention [True, ...]')
-        parser.add_argument('--share-input-output-embed', action='store_true',
-                            help='share input and output embeddings (requires'
-                                 ' --decoder-out-embed-dim and --decoder-embed-dim'
-                                 ' to be equal)')
-        # fmt: on
-
-    @classmethod
-    def build_model(cls, args, task):
         """Build a new model instance."""
         # make sure that all args are properly defaulted (in case there are any new ones)
-        base_architecture(args)
+        args = Parameters()
+        args.update(**kwargs)
+        fconv_wmt_en_de(args)
+
+        src_dict, tgt_dict = kwargs["vocab_src"], kwargs["vocab_tgt"]
 
         encoder_embed_dict = None
-        if args.encoder_embed_path:
-            encoder_embed_dict = utils.parse_embedding(args.encoder_embed_path)
-            utils.print_embed_overlap(encoder_embed_dict, task.source_dictionary)
-
         decoder_embed_dict = None
-        if args.decoder_embed_path:
-            decoder_embed_dict = utils.parse_embedding(args.decoder_embed_path)
-            utils.print_embed_overlap(decoder_embed_dict, task.target_dictionary)
 
-        encoder = FConvEncoder(
-            dictionary=task.source_dictionary,
+        if not hasattr(args, 'max_source_positions'):
+            args.max_source_positions = 1024
+        if not hasattr(args, 'max_target_positions'):
+            args.max_target_positions = 1024
+
+        self.encoder = FConvEncoder(
+            dictionary=src_dict,
             embed_dim=args.encoder_embed_dim,
             embed_dict=encoder_embed_dict,
             convolutions=eval(args.encoder_layers),
             dropout=args.dropout,
             max_positions=args.max_source_positions,
         )
-        decoder = FConvDecoder(
-            dictionary=task.target_dictionary,
+        self.decoder = FConvDecoder(
+            dictionary=tgt_dict,
             embed_dim=args.decoder_embed_dim,
             embed_dict=decoder_embed_dict,
             convolutions=eval(args.decoder_layers),
@@ -122,12 +78,65 @@ class FConvModel(FairseqEncoderDecoderModel):
             max_positions=args.max_target_positions,
             share_embed=args.share_input_output_embed,
         )
-        return FConvModel(encoder, decoder)
+        self.encoder.num_attention_layers = sum(layer is not None for layer in self.decoder.attention)
+
+    def forward(self, src_seq, tgt_seq, log_probs=True):
+        # decoder prev_output_tokens： 左移一位的target。
+        encoder_out = self.encoder(src_seq)
+        logits, decoder_out = self.decoder(
+            tgt_seq, encoder_out=encoder_out, log_probs=log_probs,
+        )
+
+        return logits
+
+    def encode(self, src_seq):
+        return self.encoder(src_seq)
+
+    def init_decoder(self, enc_outputs, expand_size=1):
+        batch = enc_outputs['encoder_out'][0].shape[0]
+        beam_size = expand_size
+
+        new_order = torch.arange(batch).view(-1, 1).repeat(1, beam_size).view(-1)
+        new_order = new_order.to(enc_outputs['encoder_out'][0].device).long()
+
+        enc_outputs = self.encoder.reorder_encoder_out(enc_outputs, new_order)
+        incremental_states = {}
+        dec_states = {
+            "enc_outputs": enc_outputs,
+            "incremental_state": incremental_states
+        }
+        return dec_states
+
+    def decode(self, tgt_seq, dec_states, log_probs=True, seed=0, sample_K=0):
+        encoder_out = dec_states['enc_outputs']
+        incremental_state = dec_states['incremental_state']
+        logits, decoder_state = self.decoder(tgt_seq, encoder_out, incremental_state, log_probs=True)
+        dec_states['incremental_state'] = incremental_state
+        return logits, dec_states
+
+    def reorder_dec_states(self, dec_states, new_beam_indices, batch_size, beam_size):
+        encoder_out = dec_states['enc_outputs']
+        incremental_state = dec_states['incremental_state']
+
+        range_ = (torch.arange(0, batch_size) * beam_size).long().to(device=new_beam_indices.device)
+
+        gather_indices_ = (new_beam_indices + torch.unsqueeze(range_, 1)).view(-1)
+
+        encoder_out = self.encoder.reorder_encoder_out(encoder_out, gather_indices_)
+        self.decoder.reorder_incremental_state(incremental_state, gather_indices_)
+
+        dec_states = {
+            "enc_outputs": encoder_out,
+            "incremental_state": incremental_state
+        }
+
+        return dec_states
 
 
 class FConvEncoder(FairseqEncoder):
     """
     Convolutional encoder consisting of `len(convolutions)` layers.
+
     Args:
         dictionary (~fairseq.data.Dictionary): encoding dictionary
         embed_dim (int, optional): embedding dimension
@@ -143,15 +152,16 @@ class FConvEncoder(FairseqEncoder):
     """
 
     def __init__(
-        self, dictionary, embed_dim=512, embed_dict=None, max_positions=1024,
-        convolutions=((512, 3),) * 20, dropout=0.1,
+            self, dictionary, embed_dim=512, embed_dict=None, max_positions=1024,
+            convolutions=((512, 3),) * 20, dropout=0.1,
     ):
         super().__init__(dictionary)
         self.dropout = dropout
         self.num_attention_layers = None
+        self.pad = dictionary.pad
 
         num_embeddings = len(dictionary)
-        self.padding_idx = dictionary.pad()
+        self.padding_idx = dictionary.pad
         self.embed_tokens = Embedding(num_embeddings, embed_dim, self.padding_idx)
         if embed_dict:
             self.embed_tokens = utils.load_embedding(embed_dict, self.dictionary, self.embed_tokens)
@@ -190,13 +200,14 @@ class FConvEncoder(FairseqEncoder):
             layer_in_channels.append(out_channels)
         self.fc2 = Linear(in_channels, embed_dim)
 
-    def forward(self, src_tokens, src_lengths):
+    def forward(self, src_tokens, src_lengths=None):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
                 `(batch, src_len)`
             src_lengths (LongTensor): lengths of each source sentence of shape
                 `(batch)`
+
         Returns:
             dict:
                 - **encoder_out** (tuple): a tuple with two elements, where the
@@ -207,6 +218,8 @@ class FConvEncoder(FairseqEncoder):
                 - **encoder_padding_mask** (ByteTensor): the positions of
                   padding elements of shape `(batch, src_len)`
         """
+        src_lengths = (src_tokens.ne(self.pad)).long().sum(dim=1)
+
         # embed tokens and positions
         x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -343,10 +356,10 @@ class FConvDecoder(FairseqIncrementalDecoder):
     """Convolutional decoder"""
 
     def __init__(
-        self, dictionary, embed_dim=512, embed_dict=None, out_embed_dim=256,
-        max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
-        dropout=0.1, share_embed=False, positional_embeddings=True,
-        adaptive_softmax_cutoff=None, adaptive_softmax_dropout=0,
+            self, dictionary, embed_dim=512, embed_dict=None, out_embed_dim=256,
+            max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
+            dropout=0.1, share_embed=False, positional_embeddings=True,
+            adaptive_softmax_cutoff=None, adaptive_softmax_dropout=0,
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
@@ -363,7 +376,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
                              'length equal to the number of layers.')
 
         num_embeddings = len(dictionary)
-        padding_idx = dictionary.pad()
+        padding_idx = dictionary.pad
         self.embed_tokens = Embedding(num_embeddings, embed_dim, padding_idx)
         if embed_dict:
             self.embed_tokens = utils.load_embedding(embed_dict, self.dictionary, self.embed_tokens)
@@ -523,6 +536,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
     def _split_encoder_out(self, encoder_out, incremental_state):
         """Split and transpose encoder outputs.
+
         This is cached when doing incremental inference.
         """
         cached_result = utils.get_incremental_state(self, incremental_state, 'encoder_out')
@@ -602,7 +616,6 @@ def ConvTBC(in_channels, out_channels, kernel_size, dropout=0, **kwargs):
     return nn.utils.weight_norm(m, dim=2)
 
 
-@register_model_architecture('fconv', 'fconv')
 def base_architecture(args):
     args.dropout = getattr(args, 'dropout', 0.1)
     args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 512)
@@ -616,43 +629,10 @@ def base_architecture(args):
     args.share_input_output_embed = getattr(args, 'share_input_output_embed', False)
 
 
-@register_model_architecture('fconv', 'fconv_iwslt_de_en')
-def fconv_iwslt_de_en(args):
-    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 256)
-    args.encoder_layers = getattr(args, 'encoder_layers', '[(256, 3)] * 4')
-    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 256)
-    args.decoder_layers = getattr(args, 'decoder_layers', '[(256, 3)] * 3')
-    args.decoder_out_embed_dim = getattr(args, 'decoder_out_embed_dim', 256)
-    base_architecture(args)
-
-
-@register_model_architecture('fconv', 'fconv_wmt_en_ro')
-def fconv_wmt_en_ro(args):
-    args.decoder_out_embed_dim = getattr(args, 'decoder_out_embed_dim', 512)
-    base_architecture(args)
-
-
-@register_model_architecture('fconv', 'fconv_wmt_en_de')
 def fconv_wmt_en_de(args):
     convs = '[(512, 3)] * 9'  # first 9 layers have 512 units
     convs += ' + [(1024, 3)] * 4'  # next 4 layers have 1024 units
     convs += ' + [(2048, 1)] * 2'  # final 2 layers use 1x1 convolutions
-
-    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 768)
-    args.encoder_layers = getattr(args, 'encoder_layers', convs)
-    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 768)
-    args.decoder_layers = getattr(args, 'decoder_layers', convs)
-    args.decoder_out_embed_dim = getattr(args, 'decoder_out_embed_dim', 512)
-    base_architecture(args)
-
-
-@register_model_architecture('fconv', 'fconv_wmt_en_fr')
-def fconv_wmt_en_fr(args):
-    convs = '[(512, 3)] * 6'  # first 6 layers have 512 units
-    convs += ' + [(768, 3)] * 4'  # next 4 layers have 768 units
-    convs += ' + [(1024, 3)] * 3'  # next 3 layers have 1024 units
-    convs += ' + [(2048, 1)] * 1'  # next 1 layer uses 1x1 convolutions
-    convs += ' + [(4096, 1)] * 1'  # final 1 layer uses 1x1 convolutions
 
     args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 768)
     args.encoder_layers = getattr(args, 'encoder_layers', convs)
